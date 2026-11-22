@@ -1,22 +1,29 @@
-# DrakoStore Discord Bot
+# DrakoStore Bot v2 (Open Source Ready)
 
-Bot todo-en-uno para **DrakoStore** (`https://drakostore.xyz`) listo para desplegar en **Render** con **UptimeRobot**.
+Bot diseñado para dejar el repositorio público en GitHub de forma segura (todas las credenciales se cargan desde **Environment** en Render).
 
-## Funciones incluidas
-- `/setup`: Construye automáticamente categorías, canales, roles, permisos, reglas, precios y panel interactivo de **1 Día Gratis**.
-- `/addkeys`: Agrega keys de prueba de 1 día por juego (`free-fire`, `cs2`, `roblox`, `robrun`, `minecraft`).
-- `/stock`: Revisa cuántas keys de prueba quedan disponibles.
-- **Pruebas gratis con captura**: El usuario abre un ticket desde el panel, sube la captura siguiendo tus redes y dando like, y el bot la envía a `#staff-aprobaciones` con botones de **Aprobar y Enviar Key** (por DM) o **Rechazar**.
-- **Auto-Moderación**: Bloquea enlaces/invitaciones a usuarios normales, frena spam rápido y da bienvenida automática.
-- **Keep-Alive HTTP**: Servidor Express integrado para mantenerlo activo 24/7 con UptimeRobot.
+## Qué hace este bot
+1. **`/setup`**: Construye toda la estructura del servidor:
+   - `📌 INICIO · START`: `👋｜welcome`, `📊｜status`, `💳｜how-to-buy`, `⭐｜vouches`, `📖｜guide`, `📜｜rules`
+   - `🛒 TIENDA · SHOP`: `🟢｜free-fire`, `🟢｜cs2`, `🟢｜roblox`, `🟢｜robrun`, `🟢｜minecraft` (con precios, tipo Kernel/Internal y botón de prueba gratis)
+   - `📢 NOVEDADES · NEWS`: `📢｜announcements`, `🚀｜updates`
+   - `💬 COMUNIDAD · COMMUNITY`: `🎫｜support` (panel de 1 Día Gratis + Ticket de Compra), `💬｜general`
+   - Canal de voz bloqueado **`🟢 Soporte en línea`**: el bot se conecta automáticamente y permanece **24/7** (con reconexión automática).
+   - Categoría privada `🔒 STAFF`: `staff-aprobaciones` para aprobar capturas con un clic.
+2. **Estado en vivo (`📊｜status`)**: Publica el tablero dividido en **PC · Kernel** y **PC · Internals** con menciones clicables a cada canal de juego.
+3. **1 Día Gratis automático**: El usuario abre su ticket, sube captura siguiendo tus redes/likes, el bot la manda a `#staff-aprobaciones` y al darle a **Aprobar**, le envía una key al privado (DM).
+4. **Auto-Moderación**: Anti-enlaces, anti-spam y bienvenida automática.
+5. **Keep-Alive HTTP**: Puerto Express abierto para UptimeRobot.
 
-## Despliegue rápido (GitHub + Render + UptimeRobot)
-1. En **Discord Developer Portal** -> **Bot**, activa **Server Members Intent** y **Message Content Intent**.
-2. Invita el bot a tu servidor con permiso **Administrator**.
-3. Sube estos archivos a un repositorio privado en **GitHub**.
-4. En **Render.com**, crea un **Web Service** conectado al repo:
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
-   - **Environment Variables:** agrega `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `WEB_URL` y (opcional) `BANNER_URL`.
-5. Copia la URL pública de Render y crea un monitor HTTP(s) cada 5 minutos en **UptimeRobot.com**.
-6. En tu servidor de Discord ejecuta `/setup` y luego `/addkeys` para cargar tus keys de prueba.
+## Variables de entorno en Render
+- `DISCORD_TOKEN`: Token del bot
+- `CLIENT_ID`: Application ID del bot
+- `GUILD_ID`: ID de tu servidor de Discord
+- `WEB_URL`: `https://drakostore.xyz`
+- `BANNER_URL`: (Opcional) URL de tu banner/GIF verde para bienvenida y paneles
+- `STATUS_BANNER_URL`: (Opcional) URL del banner superior para el canal de status
+
+## Permisos en Discord Developer Portal
+Activa en **Bot -> Privileged Gateway Intents**:
+- Server Members Intent
+- Message Content Intent
