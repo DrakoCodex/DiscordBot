@@ -28,17 +28,64 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.status(200).send('DrakoStore Bot v2 Online 24/7');
+    res.status(200).send('DrakoStore Bot v3.1 Online 24/7');
 });
 
 app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`));
 
-// ==================== 2. CONFIGURACION (TODO VIA ENV) ====================
+// ==================== 2. CONFIGURACION (VIA ENVIRONMENT DE RENDER) ====================
 const COLOR_GREEN = 0x00E87B;
 const WEB_URL = (process.env.WEB_URL || 'https://drakostore.xyz').replace(/\/$/, '');
 const BANNER_URL = process.env.BANNER_URL || '';
 const STATUS_BANNER_URL = process.env.STATUS_BANNER_URL || BANNER_URL;
+const GUIDE_BANNER_URL = process.env.GUIDE_BANNER_URL || BANNER_URL;
 const VOICE_CHANNEL_NAME = '🟢 Soporte en línea';
+
+// Jerarquia de roles en la barra derecha (de arriba hacia abajo)
+// hoist: true = seccion separada | hoist: false = aparece en "En linea" (usuarios no clientes)
+const ROLE_CONFIGS = [
+    {
+        key: 'owner',
+        name: '👑 Owner',
+        legacyNames: ['Owner'],
+        color: 0xF5B700,
+        hoist: true,
+        mentionable: false,
+        permissions: [PermissionFlagsBits.Administrator]
+    },
+    {
+        key: 'partner',
+        name: '🤝 Partner',
+        legacyNames: ['Partner', 'Patner'],
+        color: 0x00D4FF,
+        hoist: true,
+        mentionable: false
+    },
+    {
+        key: 'bots',
+        name: '🤖 Bots',
+        legacyNames: ['Bots', 'Bot'],
+        color: 0x5865F2,
+        hoist: true,
+        mentionable: false
+    },
+    {
+        key: 'clientes',
+        name: '💎 Clientes',
+        legacyNames: ['Clientes', 'Cliente VIP', 'Cliente'],
+        color: COLOR_GREEN,
+        hoist: true,
+        mentionable: false
+    },
+    {
+        key: 'miembro',
+        name: 'Miembro',
+        legacyNames: [],
+        color: 0x8EA398,
+        hoist: false,
+        mentionable: false
+    }
+];
 
 const GAMES = {
     'free-fire': {
@@ -46,35 +93,125 @@ const GAMES = {
         slug: 'free-fire',
         type: 'Internal',
         channelName: '🟢｜free-fire',
-        desc: 'Optimizado para MSI App Player y BlueStacks 5 en Windows. Aimbot suave, ESP limpio y modo StreamProof.'
+        topic: 'DrakoStore · Free Fire Internal (Windows / Emulador) · Precios y compra',
+        tagline: 'DEDICADO A JUGADORES DE EMULADOR EN WINDOWS',
+        desc: 'Suite Internal optimizada para **MSI App Player y BlueStacks 5** en Windows. Precisión suave, cero caídas de FPS y modo StreamProof.',
+        bannerEnv: 'IMG_FF_BANNER',
+        menuEnv: 'IMG_FF_MENU',
+        shortFeatures: [
+            '🎯 **Aimbot** — Legit o Competitivo, selección de hueso (cabeza, cuello, pecho), FOV visible y suavizado.',
+            '👁️ **ESP Completo** — Cajas 2D/3D, esqueleto, vida, distancia y alerta de enemigos cercanos.',
+            '🛡️ **StreamProof** — Oculto ante OBS, Discord y capturas de pantalla.'
+        ],
+        fullFeatures: [
+            '• Aimbot configurable por hueso con suavizado humano (Smooth)',
+            '• Control de retroceso (No Recoil) y FOV personalizable',
+            '• ESP de jugadores (Cajas, Skeleton, Vida, Arma, Distancia)',
+            '• ESP de botín y cajas de suministro',
+            '• Bypass optimizado para MSI App Player y BlueStacks 5 (Windows)',
+            '• Modo StreamProof (invisible en OBS y transmisiones)',
+            '• Guardado de perfiles Legit / Competitivo'
+        ]
     },
     'cs2': {
         name: 'Counter-Strike 2',
         slug: 'cs2',
         type: 'Internal',
         channelName: '🟢｜cs2',
-        desc: 'Internal para Windows enfocado en Premier y Matchmaking. Aimbot Legit, RCS y visuales sin pérdida de FPS.'
+        topic: 'DrakoStore · Counter-Strike 2 Internal (Windows) · Precios y compra',
+        tagline: 'PRECISIÓN INTERNAL PARA PREMIER Y MATCHMAKING',
+        desc: 'Arquitectura **Internal** diseñada para rendimiento fluido en Windows 10/11. Aimbot Legit, RCS automático y visuales nítidos sin pérdida de FPS.',
+        bannerEnv: 'IMG_CS2_BANNER',
+        menuEnv: 'IMG_CS2_MENU',
+        shortFeatures: [
+            '🎯 **Aimbot Legit** — Configuración por arma, curvas suaves, verificación de visibilidad y RCS automático.',
+            '🔫 **Triggerbot** — Disparo automático con tecla y retardo humano en milisegundos.',
+            '👁️ **ESP & Radar** — Cajas, esqueleto, vida, chaleco, armas, temporizador C4 y lista de espectadores.'
+        ],
+        fullFeatures: [
+            '• Aimbot Internal por arma con suavizado natural',
+            '• RCS (Recoil Control System) en ejes X e Y',
+            '• Triggerbot con delay configurable',
+            '• Box ESP, Skeleton, barra de salud y armadura',
+            '• Temporizador de bomba C4 y armas en suelo',
+            '• Radar 2D en pantalla y lista de espectadores',
+            '• Configs guardables en 1 clic + modo StreamProof'
+        ]
     },
     'roblox': {
         name: 'Roblox',
         slug: 'roblox',
         type: 'Internal',
         channelName: '🟢｜roblox',
-        desc: 'Ejecutor Internal Luau estable para Windows, sin key systems molestos y con Script Hub integrado.'
+        topic: 'DrakoStore · Roblox Internal (Windows) · Precios y compra',
+        tagline: 'EJECUTOR INTERNAL LUAU DE ALTA ESTABILIDAD',
+        desc: 'Motor **Internal** para Windows con alta compatibilidad UNC, sin key systems molestos ni anuncios, y con Script Hub listo para usar.',
+        bannerEnv: 'IMG_ROBLOX_BANNER',
+        menuEnv: 'IMG_ROBLOX_MENU',
+        shortFeatures: [
+            '⚡ **Motor Internal** — Alta compatibilidad UNC, inyección instantánea y soporte multi-pestaña.',
+            '👁️ **Hub Integrado** — ESP universal, Aimbot para shooters, Speed, Fly y Noclip.',
+            '🛡️ **Sin Key System** — Acceso directo con tu licencia, tecla de pánico y desbloqueador de FPS.'
+        ],
+        fullFeatures: [
+            '• Alta compatibilidad UNC para scripts complejos en Luau',
+            '• Inyección Internal rápida con bajo uso de CPU',
+            '• Editor con pestañas múltiples y Auto-Execute',
+            '• Script Hub verificado para los juegos más populares',
+            '• ESP universal, Aimbot y cámara libre',
+            '• Sin acortadores ni publicidad externa',
+            '• Tecla de pánico para ocultar el menú al instante'
+        ]
     },
     'robrun': {
         name: 'ROB RUN',
         slug: 'robrun',
         type: 'Kernel',
         channelName: '🟢｜robrun',
-        desc: 'Arquitectura Kernel para Windows con Aimbot silencioso, ESP total de jugadores y botín.'
+        topic: 'DrakoStore · ROB RUN Kernel (Windows) · Precios y compra',
+        tagline: 'DEDICADO A JUGADORES QUE BUSCAN MÁXIMA SEGURIDAD',
+        desc: 'Suite **100% Nivel Kernel (Ring 0)** para ROB RUN en Windows. Lectura directa desde driver propio, visuales limpios y puntería precisa.',
+        bannerEnv: 'IMG_ROBRUN_BANNER',
+        menuEnv: 'IMG_ROBRUN_MENU',
+        shortFeatures: [
+            '🎯 **Aimbot Kernel** — Puntería silenciosa o suave, FOV visible y selección de zona objetivo.',
+            '👁️ **ESP Total** — Jugadores, distancia, vida, equipamiento y ubicación de botín.',
+            '⚡ **Driver Ring 0** — Carga limpia desde el loader sin sacrificar tus FPS.'
+        ],
+        fullFeatures: [
+            '• Arquitectura Kernel (Ring 0) para Windows 10 y 11',
+            '• Aimbot preciso con ajuste de FOV y suavizado',
+            '• Reducción de dispersión y estabilidad al apuntar',
+            '• ESP de jugadores con cajas, distancia y vida',
+            '• ESP de loot y puntos clave del mapa',
+            '• Guardado instantáneo de configuraciones',
+            '• Compatible con pantalla completa y ventana sin bordes'
+        ]
     },
     'minecraft': {
         name: 'Minecraft Java',
         slug: 'minecraft',
         type: 'Kernel',
         channelName: '🟢｜minecraft',
-        desc: 'Ghost Client Kernel competitivo para Windows. AutoClicker, AimAssist, visuales y Self-Destruct limpio.'
+        topic: 'DrakoStore · Minecraft Java Kernel (Windows) · Precios y compra',
+        tagline: 'GHOST CLIENT KERNEL PARA PVP COMPETITIVO',
+        desc: 'Cliente fantasma a **Nivel Kernel (Ring 0)** diseñado para servidores PvP en Windows. Módulos legítimos indetectables y limpieza total.',
+        bannerEnv: 'IMG_MC_BANNER',
+        menuEnv: 'IMG_MC_MENU',
+        shortFeatures: [
+            '🎯 **Combate PvP** — AutoClicker aleatorizado, AimAssist suave, Reach y Velocity legítimos.',
+            '👁️ **Visuales & Mundo** — NameTags con armadura, ChestESP, PlayerESP y trayectorias.',
+            '🛡️ **Sigilo Kernel** — FastBridge inteligente y botón Self-Destruct en 1 clic.'
+        ],
+        fullFeatures: [
+            '• Ejecución a nivel Kernel para máxima discreción en PvP',
+            '• AutoClicker con patrones de aleatorización realistas',
+            '• AimAssist suave y TriggerBot con cooldown',
+            '• Reach y Velocity ajustables al milímetro',
+            '• NameTags (armadura, corazones, encantamientos) y ChestESP',
+            '• FastBridge / Eagle inteligente',
+            '• Self-Destruct: limpia rastros de memoria en 1 clic'
+        ]
     }
 };
 
@@ -88,7 +225,7 @@ const keyStock = {
 };
 
 const claimedUsers = new Set();
-const activeTrialTickets = new Map(); // channelId -> { userId, gameKey }
+const activeTrialTickets = new Map();
 const spamTracker = new Map();
 
 const client = new Client({
@@ -102,7 +239,7 @@ const client = new Client({
     partials: [Partials.Channel]
 });
 
-// ==================== 3. CONEXION 24/7 AL CANAL DE VOZ "🟢 Soporte en línea" ====================
+// ==================== 3. CONEXION 24/7 AL CANAL DE VOZ ====================
 function connectToSupportVoice(guild) {
     if (!guild) return;
     const voiceChannel = guild.channels.cache.find(
@@ -144,7 +281,12 @@ function connectToSupportVoice(guild) {
 const commands = [
     new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('Construye todo el servidor DrakoStore (canales, tienda, status y voz 24/7)')
+        .setDescription('Crea o verifica todos los canales, roles y paneles sin duplicar nada')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName('update')
+        .setDescription('Actualiza los embeds, imagenes y permisos de todos los canales ya creados')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
@@ -175,7 +317,7 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(c => c.toJSON());
 
-client.once('ready', async () => {
+client.once('clientReady', async () => {
     console.log(`[BOT] Conectado como ${client.user.tag}`);
 
     client.user.setPresence({
@@ -190,7 +332,7 @@ client.once('ready', async () => {
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
-            console.log('[BOT] Slash commands registrados.');
+            console.log('[BOT] Slash commands registrados (/setup, /update, /addkeys, /stock).');
         } catch (err) {
             console.error('[ERROR] Registrando comandos:', err);
         }
@@ -198,14 +340,26 @@ client.once('ready', async () => {
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
         if (guild) {
             connectToSupportVoice(guild);
-            // Verificacion periodica cada 2 minutos para asegurar presencia 24/7 en voz
             setInterval(() => connectToSupportVoice(guild), 120000);
         }
     }
 });
 
-// ==================== 5. BIENVENIDA AUTOMATICA ====================
+// ==================== 5. BIENVENIDA AUTOMATICA Y AUTO-ROLES ====================
 client.on('guildMemberAdd', async (member) => {
+    if (member.user.bot) {
+        const botRole = member.guild.roles.cache.find(r => r.name === '🤖 Bots');
+        if (botRole && botRole.editable) {
+            await member.roles.add(botRole).catch(() => {});
+        }
+        return;
+    }
+
+    const memberRole = member.guild.roles.cache.find(r => r.name === 'Miembro');
+    if (memberRole && memberRole.editable) {
+        await member.roles.add(memberRole).catch(() => {});
+    }
+
     const ch = member.guild.channels.cache.find(c => c.name.includes('welcome'));
     if (!ch) return;
 
@@ -296,16 +450,113 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// ==================== 7. INTERACCIONES (SLASH, TICKETS Y APROBACION) ====================
+// ==================== 7. HELPERS PARA CREAR TICKETS ====================
+async function createTrialTicket(interaction, gameKey) {
+    if (claimedUsers.has(interaction.user.id)) {
+        return interaction.editReply('Ya reclamaste tu prueba gratuita de 1 día anteriormente.');
+    }
+
+    const game = GAMES[gameKey];
+    const guild = interaction.guild;
+    const category = guild.channels.cache.find(
+        c => c.type === ChannelType.GuildCategory && c.name.includes('COMUNIDAD')
+    );
+
+    const ticketChannel = await guild.channels.create({
+        name: `prueba-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`,
+        type: ChannelType.GuildText,
+        parent: category?.id,
+        permissionOverwrites: [
+            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            {
+                id: interaction.user.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles]
+            }
+        ]
+    });
+
+    activeTrialTickets.set(ticketChannel.id, { userId: interaction.user.id, gameKey });
+
+    const embed = new EmbedBuilder()
+        .setColor(COLOR_GREEN)
+        .setTitle(`🎁 Prueba 1 Día Gratis — ${game.name} (${game.type})`)
+        .setDescription(
+            `Hola ${interaction.user}, sigue estos 2 pasos para recibir tu key de 24 horas por privado:\n\n` +
+            `1. Sígueme en mis redes y dale **like** a mis videos.\n` +
+            `2. **Sube aquí mismo la captura de pantalla**.\n\n` +
+            `En cuanto sea aprobada, el bot te enviará tu key automáticamente por DM.`
+        );
+
+    const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Ticket').setStyle(ButtonStyle.Secondary)
+    );
+
+    await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed], components: [closeRow] });
+    return interaction.editReply(`Canal creado: ${ticketChannel}. Sube ahí tu captura.`);
+}
+
+async function createGeneralTicket(interaction, tipo, gameKey = null) {
+    const guild = interaction.guild;
+    const category = guild.channels.cache.find(
+        c => c.type === ChannelType.GuildCategory && c.name.includes('COMUNIDAD')
+    );
+
+    const prefix = tipo === 'compra' ? 'compra' : 'soporte';
+    const ticketChannel = await guild.channels.create({
+        name: `${prefix}-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`,
+        type: ChannelType.GuildText,
+        parent: category?.id,
+        permissionOverwrites: [
+            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            {
+                id: interaction.user.id,
+                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles]
+            }
+        ]
+    });
+
+    const gameLine = gameKey && GAMES[gameKey]
+        ? `• **Juego seleccionado:** ${GAMES[gameKey].name} (${GAMES[gameKey].type})\n`
+        : `• **Juego:** Free Fire / CS2 / Roblox / ROB RUN / Minecraft\n`;
+
+    const embed = new EmbedBuilder()
+        .setColor(COLOR_GREEN)
+        .setTitle(tipo === 'compra' ? '🛒 Ticket de Compra — DrakoStore' : '🛠️ Ticket de Soporte — DrakoStore')
+        .setDescription(
+            tipo === 'compra'
+                ? `Hola ${interaction.user}, indícanos los datos de tu pedido:\n\n` +
+                  gameLine +
+                  `• **Plan:** 1 Día ($1.50) · 7 Días ($6) · 30 Días ($12) · 90 Días ($25)\n` +
+                  `• **Método de pago:** Yape / Plin / Binance Pay / PayPal\n\n` +
+                  `Un administrador te atenderá en breve.`
+                : `Hola ${interaction.user}, cuéntanos en qué podemos ayudarte (instalación, licencia, dudas o soporte técnico) y adjunta capturas si es necesario.`
+        );
+
+    const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('close_ticket').setLabel('Cerrar Ticket').setStyle(ButtonStyle.Secondary)
+    );
+
+    await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed], components: [closeRow] });
+    return interaction.editReply(`Ticket creado: ${ticketChannel}`);
+}
+
+// ==================== 8. INTERACCIONES ====================
 client.on('interactionCreate', async (interaction) => {
     try {
         // --- SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
-            if (interaction.commandName === 'setup') {
+            if (interaction.commandName === 'setup' || interaction.commandName === 'update') {
                 await interaction.deferReply({ ephemeral: true });
-                await buildServer(interaction.guild);
+                const summary = await syncServer(interaction.guild);
                 connectToSupportVoice(interaction.guild);
-                return interaction.editReply('Servidor **DrakoStore** construido completo y bot conectado a **🟢 Soporte en línea**. Usa `/addkeys` para cargar stock.');
+                return interaction.editReply(
+                    `✅ **Sincronización completada (${interaction.commandName === 'setup' ? 'Setup' : 'Update'})**\n` +
+                    `• Roles creados: **${summary.rolesCreated}** | verificados/actualizados: **${summary.rolesUpdated}**\n` +
+                    `• Canales creados: **${summary.created}** | verificados/actualizados: **${summary.updated}**\n` +
+                    `• Jerarquía de roles: **👑 Owner → 🤝 Partner → 🤖 Bots → 💎 Clientes → En línea (no clientes)**\n` +
+                    `• Paneles e imágenes actualizados sin duplicados.\n` +
+                    `• Bot conectado a **${VOICE_CHANNEL_NAME}**.`
+                );
             }
 
             if (interaction.commandName === 'addkeys') {
@@ -330,7 +581,55 @@ client.on('interactionCreate', async (interaction) => {
             }
         }
 
-        // --- BOTON: PEDIR 1 DIA GRATIS (DESDE SUPPORT O DESDE CANAL DE JUEGO) ---
+        // --- BOTONES DE INFORMACION EN CANALES DE TIENDA ---
+        if (interaction.isButton() && interaction.customId.startsWith('info_features_')) {
+            const gameKey = interaction.customId.replace('info_features_', '');
+            const g = GAMES[gameKey];
+            if (!g) return;
+
+            const embed = new EmbedBuilder()
+                .setColor(COLOR_GREEN)
+                .setTitle(`✨ Funciones completas — ${g.name} (${g.type})`)
+                .setDescription(g.fullFeatures.join('\n'))
+                .setFooter({ text: `Más info y video demo en ${WEB_URL}/juego?id=${g.slug}` });
+
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        if (interaction.isButton() && interaction.customId === 'info_payments') {
+            const embed = new EmbedBuilder()
+                .setColor(COLOR_GREEN)
+                .setTitle('💳 Métodos de Pago y Precios')
+                .setDescription(
+                    `**Precios unificados (todos los juegos):**\n` +
+                    `\`1 día  · day  \` **$1.50 USD**\n` +
+                    `\`7 días · days \` **$6 USD** ⭐\n` +
+                    `\`30 días · days\` **$12 USD**\n` +
+                    `\`90 días · days\` **$25 USD**\n\n` +
+                    `**Métodos aceptados en ticket:**\n` +
+                    `• **Yape / Plin** (Perú - al instante)\n` +
+                    `• **Binance Pay** (USDT sin comisión)\n` +
+                    `• **PayPal** (Internacional)\n` +
+                    `• **Cripto / Transferencia**`
+                );
+            return interaction.reply({ embeds: [embed], ephemeral: true });
+        }
+
+        // --- BOTON: PRUEBA DIRECTA DESDE CANAL DE JUEGO ---
+        if (interaction.isButton() && interaction.customId.startsWith('trial_direct_')) {
+            await interaction.deferReply({ ephemeral: true });
+            const gameKey = interaction.customId.replace('trial_direct_', '');
+            return createTrialTicket(interaction, gameKey);
+        }
+
+        // --- BOTON: COMPRA DIRECTA DESDE CANAL DE JUEGO ---
+        if (interaction.isButton() && interaction.customId.startsWith('buy_direct_')) {
+            await interaction.deferReply({ ephemeral: true });
+            const gameKey = interaction.customId.replace('buy_direct_', '');
+            return createGeneralTicket(interaction, 'compra', gameKey);
+        }
+
+        // --- BOTON: MENU GENERAL DE PRUEBA GRATIS ---
         if (interaction.isButton() && interaction.customId === 'open_trial_menu') {
             if (claimedUsers.has(interaction.user.id)) {
                 return interaction.reply({ content: 'Ya reclamaste tu prueba gratuita de 1 día anteriormente.', ephemeral: true });
@@ -353,95 +652,27 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        // --- BOTON: TICKET DE COMPRA ---
-        if (interaction.isButton() && interaction.customId === 'open_buy_ticket') {
+        if (interaction.isStringSelectMenu() && interaction.customId === 'select_trial_game') {
             await interaction.deferReply({ ephemeral: true });
-            const guild = interaction.guild;
-            const category = guild.channels.cache.find(
-                c => c.type === ChannelType.GuildCategory && c.name.includes('COMUNIDAD')
-            );
-
-            const ticketChannel = await guild.channels.create({
-                name: `compra-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`,
-                type: ChannelType.GuildText,
-                parent: category?.id,
-                permissionOverwrites: [
-                    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                    {
-                        id: interaction.user.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles]
-                    }
-                ]
-            });
-
-            const embed = new EmbedBuilder()
-                .setColor(COLOR_GREEN)
-                .setTitle('Ticket de Compra — DrakoStore')
-                .setDescription(
-                    `Hola ${interaction.user}, indícanos:\n\n` +
-                    `• **Juego:** Free Fire / CS2 / Roblox / ROB RUN / Minecraft\n` +
-                    `• **Plan:** 1 Día ($1.50) · 7 Días ($6) · 30 Días ($12) · 90 Días ($25)\n` +
-                    `• **Método de pago:** Yape / Plin / Binance Pay / PayPal\n\n` +
-                    `Un administrador te atenderá en breve.`
-                );
-
-            const closeRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
-                    .setCustomId('close_ticket')
-                    .setLabel('Cerrar Ticket')
-                    .setStyle(ButtonStyle.Secondary)
-            );
-
-            await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed], components: [closeRow] });
-            return interaction.editReply(`Ticket de compra creado: ${ticketChannel}`);
+            return createTrialTicket(interaction, interaction.values[0]);
         }
 
-        // --- BOTON: CERRAR TICKET ---
+        // --- BOTON: TICKET COMPRA O SOPORTE GENERAL ---
+        if (interaction.isButton() && interaction.customId === 'open_buy_ticket') {
+            await interaction.deferReply({ ephemeral: true });
+            return createGeneralTicket(interaction, 'compra');
+        }
+
+        if (interaction.isButton() && interaction.customId === 'open_support_ticket') {
+            await interaction.deferReply({ ephemeral: true });
+            return createGeneralTicket(interaction, 'soporte');
+        }
+
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
             await interaction.reply('Cerrando ticket en 5 segundos...');
             activeTrialTickets.delete(interaction.channel.id);
             setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
             return;
-        }
-
-        // --- MENU: CREAR TICKET DE 1 DIA GRATIS ---
-        if (interaction.isStringSelectMenu() && interaction.customId === 'select_trial_game') {
-            await interaction.deferReply({ ephemeral: true });
-            const gameKey = interaction.values[0];
-            const game = GAMES[gameKey];
-            const guild = interaction.guild;
-
-            const category = guild.channels.cache.find(
-                c => c.type === ChannelType.GuildCategory && c.name.includes('COMUNIDAD')
-            );
-
-            const ticketChannel = await guild.channels.create({
-                name: `prueba-${interaction.user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12)}`,
-                type: ChannelType.GuildText,
-                parent: category?.id,
-                permissionOverwrites: [
-                    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                    {
-                        id: interaction.user.id,
-                        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AttachFiles]
-                    }
-                ]
-            });
-
-            activeTrialTickets.set(ticketChannel.id, { userId: interaction.user.id, gameKey });
-
-            const embed = new EmbedBuilder()
-                .setColor(COLOR_GREEN)
-                .setTitle(`Prueba 1 Día Gratis — ${game.name} (${game.type})`)
-                .setDescription(
-                    `Hola ${interaction.user}, sigue estos 2 pasos para recibir tu key de 24 horas por privado:\n\n` +
-                    `1. Sígueme en mis redes y dale **like** a mis videos.\n` +
-                    `2. **Sube aquí mismo la captura de pantalla**.\n\n` +
-                    `En cuanto sea aprobada, el bot te enviará tu key automáticamente por DM.`
-                );
-
-            await ticketChannel.send({ content: `${interaction.user}`, embeds: [embed] });
-            return interaction.editReply(`Canal creado: ${ticketChannel}. Sube ahí tu captura.`);
         }
 
         // --- STAFF: APROBAR Y ENVIAR KEY POR PRIVADO ---
@@ -465,7 +696,7 @@ client.on('interactionCreate', async (interaction) => {
             const user = await client.users.fetch(userId);
             const dmEmbed = new EmbedBuilder()
                 .setColor(COLOR_GREEN)
-                .setTitle('Tu prueba de 1 Día Gratis fue aprobada')
+                .setTitle('🎁 Tu prueba de 1 Día Gratis fue aprobada')
                 .setDescription(
                     `Gracias por apoyar a **DrakoStore**.\n\n` +
                     `**Juego:** ${GAMES[gameKey].name} (${GAMES[gameKey].type})\n` +
@@ -486,7 +717,7 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             await interaction.update({
-                content: `Aprobado por ${interaction.user}. Key enviada al privado de <@${userId}>.`,
+                content: `✅ Aprobado por ${interaction.user}. Key enviada al privado de <@${userId}>.`,
                 components: []
             });
 
@@ -501,7 +732,7 @@ client.on('interactionCreate', async (interaction) => {
         // --- STAFF: RECHAZAR ---
         if (interaction.isButton() && interaction.customId.startsWith('reject_')) {
             const [, userId, ticketChannelId] = interaction.customId.split('_');
-            await interaction.update({ content: `Rechazado por ${interaction.user}.`, components: [] });
+            await interaction.update({ content: `❌ Rechazado por ${interaction.user}.`, components: [] });
 
             const tCh = interaction.guild.channels.cache.get(ticketChannelId);
             if (tCh) {
@@ -513,161 +744,376 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// ==================== 8. CONSTRUCTOR COMPLETO DEL SERVIDOR ====================
-async function buildServer(guild) {
-    await guild.roles.create({ name: 'Cliente VIP', color: COLOR_GREEN }).catch(() => {});
-    await guild.roles.create({ name: 'Miembro', color: 0x8EA398 }).catch(() => {});
+// ==================== 9. SINCRONIZACION INTELIGENTE (SETUP / UPDATE SIN DUPLICAR) ====================
+async function ensureRole(guild, cfg, stats) {
+    let role = guild.roles.cache.find(r => !r.managed && r.name === cfg.name);
+    if (!role && cfg.legacyNames?.length) {
+        const lowerLegacy = cfg.legacyNames.map(n => n.toLowerCase());
+        role = guild.roles.cache.find(r => !r.managed && lowerLegacy.includes(r.name.toLowerCase()));
+    }
 
-    // 1) CANAL DE VOZ 24/7 ARRIBA/VISIBLE: "🟢 Soporte en línea" (bloqueado para usuarios)
-    await guild.channels.create({
-        name: VOICE_CHANNEL_NAME,
-        type: ChannelType.GuildVoice,
-        permissionOverwrites: [
-            {
-                id: guild.id,
-                allow: [PermissionFlagsBits.ViewChannel],
-                deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
-            },
-            {
-                id: client.user.id,
-                allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
+    if (!role) {
+        const createOpts = {
+            name: cfg.name,
+            color: cfg.color,
+            hoist: cfg.hoist,
+            mentionable: cfg.mentionable
+        };
+        if (cfg.permissions) createOpts.permissions = cfg.permissions;
+        role = await guild.roles.create(createOpts).catch(() => null);
+        if (role) stats.rolesCreated++;
+    } else {
+        if (role.editable) {
+            const needsEdit =
+                role.name !== cfg.name ||
+                role.color !== cfg.color ||
+                role.hoist !== cfg.hoist ||
+                role.mentionable !== cfg.mentionable;
+
+            if (needsEdit) {
+                const editOpts = {
+                    name: cfg.name,
+                    color: cfg.color,
+                    hoist: cfg.hoist,
+                    mentionable: cfg.mentionable
+                };
+                if (cfg.permissions) editOpts.permissions = cfg.permissions;
+                await role.edit(editOpts).catch(() => {});
             }
-        ]
-    });
+        }
+        stats.rolesUpdated++;
+    }
+    return role;
+}
 
-    // 2) CATEGORIA: INICIO · START
-    const catStart = await guild.channels.create({ name: '📌 INICIO · START', type: ChannelType.GuildCategory });
-    const chWelcome = await guild.channels.create({ name: '👋｜welcome', type: ChannelType.GuildText, parent: catStart.id });
-    const chStatus = await guild.channels.create({ name: '📊｜status', type: ChannelType.GuildText, parent: catStart.id });
-    const chBuy = await guild.channels.create({ name: '💳｜how-to-buy', type: ChannelType.GuildText, parent: catStart.id });
-    await guild.channels.create({ name: '⭐｜vouches', type: ChannelType.GuildText, parent: catStart.id });
-    const chGuide = await guild.channels.create({ name: '📖｜guide', type: ChannelType.GuildText, parent: catStart.id });
-    const chRules = await guild.channels.create({ name: '📜｜rules', type: ChannelType.GuildText, parent: catStart.id });
+async function syncRoles(guild, stats) {
+    await guild.roles.fetch();
+    const roles = {};
 
-    // 3) CATEGORIA: TIENDA · SHOP (1 canal por cada juego)
-    const catShop = await guild.channels.create({ name: '🛒 TIENDA · SHOP', type: ChannelType.GuildCategory });
+    for (const cfg of ROLE_CONFIGS) {
+        roles[cfg.key] = await ensureRole(guild, cfg, stats);
+    }
+
+    // Reordenar jerarquia de arriba hacia abajo: Owner > Partner > Bots > Clientes > Miembro
+    await guild.roles.fetch();
+    const botMaxPos = guild.members.me?.roles.highest?.position ?? 1;
+    const orderedEditable = ROLE_CONFIGS
+        .map(cfg => roles[cfg.key])
+        .filter(r => r && r.editable && r.position < botMaxPos);
+
+    if (orderedEditable.length > 0 && botMaxPos > 1) {
+        const positionUpdates = orderedEditable.map((role, idx) => ({
+            role: role.id,
+            position: Math.max(1, botMaxPos - 1 - idx)
+        }));
+        await guild.roles.setPositions(positionUpdates).catch(() => {});
+    }
+
+    // Auto-asignar roles: Owner al dueno, Bots a bots, Miembro (hoist: false) a humanos
+    await guild.members.fetch().catch(() => {});
+
+    if (roles.owner && roles.owner.editable) {
+        const ownerMember = guild.members.cache.get(guild.ownerId);
+        if (ownerMember && !ownerMember.roles.cache.has(roles.owner.id)) {
+            await ownerMember.roles.add(roles.owner).catch(() => {});
+        }
+    }
+
+    for (const member of guild.members.cache.values()) {
+        if (member.user.bot) {
+            if (roles.bots && roles.bots.editable && !member.roles.cache.has(roles.bots.id)) {
+                await member.roles.add(roles.bots).catch(() => {});
+            }
+        } else {
+            if (roles.miembro && roles.miembro.editable && !member.roles.cache.has(roles.miembro.id)) {
+                await member.roles.add(roles.miembro).catch(() => {});
+            }
+        }
+    }
+
+    return roles;
+}
+
+async function ensureCategory(guild, name, overwrites = null, stats) {
+    let cat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name === name);
+    if (!cat) {
+        const opts = { name, type: ChannelType.GuildCategory };
+        if (overwrites) opts.permissionOverwrites = overwrites;
+        cat = await guild.channels.create(opts);
+        stats.created++;
+    } else {
+        if (overwrites) await cat.permissionOverwrites.set(overwrites).catch(() => {});
+        stats.updated++;
+    }
+    return cat;
+}
+
+async function ensureChannel(guild, name, type, parentId, { readOnly = false, topic = null, overwrites = null } = {}, stats) {
+    let ch = guild.channels.cache.find(c => c.type === type && c.name === name);
+
+    if (!ch) {
+        const opts = { name, type };
+        if (parentId) opts.parent = parentId;
+        if (topic && type === ChannelType.GuildText) opts.topic = topic;
+        if (overwrites) opts.permissionOverwrites = overwrites;
+        ch = await guild.channels.create(opts);
+        stats.created++;
+    } else {
+        if (parentId && ch.parentId !== parentId) {
+            await ch.setParent(parentId, { lockPermissions: false }).catch(() => {});
+        }
+        if (topic && type === ChannelType.GuildText && ch.topic !== topic) {
+            await ch.setTopic(topic).catch(() => {});
+        }
+        if (overwrites) {
+            await ch.permissionOverwrites.set(overwrites).catch(() => {});
+        }
+        stats.updated++;
+    }
+
+    if (readOnly && type === ChannelType.GuildText && !overwrites) {
+        await ch.permissionOverwrites.edit(guild.id, { SendMessages: false }).catch(() => {});
+    }
+
+    return ch;
+}
+
+// Edita el mensaje existente del bot en el canal o envia uno nuevo si no existe
+async function upsertBotMessage(channel, payload) {
+    try {
+        const messages = await channel.messages.fetch({ limit: 15 });
+        const existing = messages.find(m => m.author.id === client.user.id);
+        if (existing) {
+            await existing.edit(payload);
+            return existing;
+        }
+    } catch {}
+    return channel.send(payload);
+}
+
+function buildGamePayload(key, g) {
+    const unixNow = Math.floor(Date.now() / 1000);
+    const topBanner = process.env[g.bannerEnv] || '';
+    const menuImg = process.env[g.menuEnv] || '';
+    const embeds = [];
+
+    // Embed superior dedicado al GIF/Banner (si esta configurado en Render)
+    if (topBanner) {
+        embeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(topBanner));
+    }
+
+    const mainEmbed = new EmbedBuilder()
+        .setColor(COLOR_GREEN)
+        .setTitle(`🟢 DrakoStore · ${g.name}`)
+        .setDescription(
+            `🛡️ **${g.tagline}**\n` +
+            `${g.desc}\n\n` +
+            `✅ **Funcionando · Working** · \`Windows · ${g.type}\` · 🔄 <t:${unixNow}:R>\n\n` +
+            `✨ **Funciones · Features**\n` +
+            `${g.shortFeatures.join('\n')}\n\n` +
+            `💰 **Planes · Plans**\n` +
+            `\`1 día  · day  \` **$1.50 USD**\n` +
+            `\`7 días · days \` **$6 USD** ⭐\n` +
+            `\`30 días · days\` **$12 USD**\n` +
+            `\`90 días · days\` **$25 USD**\n` +
+            `🎁 **Prueba gratis 1 día · 1-day free trial**\n\n` +
+            `🌐 **Ver demo en vivo:** ${WEB_URL}/juego?id=${g.slug}`
+        )
+        .setFooter({ text: `⚡ ${g.type} (Windows) · 1 key = 1 PC · auto-updates` });
+
+    if (menuImg) {
+        mainEmbed.setImage(menuImg);
+    }
+
+    embeds.push(mainEmbed);
+
+    const row1 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`buy_direct_${key}`)
+            .setLabel('Comprar · Buy')
+            .setEmoji('🛒')
+            .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+            .setCustomId(`trial_direct_${key}`)
+            .setLabel('Prueba gratis · Free trial')
+            .setEmoji('🎁')
+            .setStyle(ButtonStyle.Primary)
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`info_features_${key}`)
+            .setLabel('Funciones · Features')
+            .setEmoji('📋')
+            .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+            .setCustomId('info_payments')
+            .setLabel('Pagos · Payment')
+            .setEmoji('💳')
+            .setStyle(ButtonStyle.Secondary)
+    );
+
+    return { embeds, components: [row1, row2] };
+}
+
+async function syncServer(guild) {
+    await guild.channels.fetch();
+    const stats = { created: 0, updated: 0, rolesCreated: 0, rolesUpdated: 0 };
+
+    await syncRoles(guild, stats);
+
+    // 1) CANAL DE VOZ 24/7 BLOQUEADO
+    await ensureChannel(
+        guild,
+        VOICE_CHANNEL_NAME,
+        ChannelType.GuildVoice,
+        null,
+        {
+            overwrites: [
+                {
+                    id: guild.id,
+                    allow: [PermissionFlagsBits.ViewChannel],
+                    deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
+                },
+                {
+                    id: client.user.id,
+                    allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
+                }
+            ]
+        },
+        stats
+    );
+
+    // 2) INICIO · START
+    const catStart = await ensureCategory(guild, '📌 INICIO · START', null, stats);
+    await ensureChannel(guild, '👋｜welcome', ChannelType.GuildText, catStart.id, { readOnly: true, topic: 'Bienvenidas automáticas de DrakoStore' }, stats);
+    const chStatus = await ensureChannel(guild, '📊｜status', ChannelType.GuildText, catStart.id, { readOnly: true, topic: 'Estado en vivo de todos los servicios' }, stats);
+    const chBuy = await ensureChannel(guild, '💳｜how-to-buy', ChannelType.GuildText, catStart.id, { readOnly: true, topic: 'Precios unificados y métodos de pago' }, stats);
+    const chVouches = await ensureChannel(guild, '⭐｜vouches', ChannelType.GuildText, catStart.id, { topic: 'Reseñas reales de clientes de DrakoStore' }, stats);
+    const chGuide = await ensureChannel(guild, '📖｜guide', ChannelType.GuildText, catStart.id, { readOnly: true, topic: 'Instalación, problemas comunes y cómo pedir ayuda' }, stats);
+    const chRules = await ensureChannel(guild, '📜｜rules', ChannelType.GuildText, catStart.id, { readOnly: true, topic: 'Reglas del servidor DrakoStore' }, stats);
+
+    // 3) TIENDA · SHOP
+    const catShop = await ensureCategory(guild, '🛒 TIENDA · SHOP', null, stats);
     const gameChannels = {};
     for (const [key, g] of Object.entries(GAMES)) {
-        const ch = await guild.channels.create({
-            name: g.channelName,
-            type: ChannelType.GuildText,
-            parent: catShop.id
-        });
-        await ch.permissionOverwrites.edit(guild.id, { SendMessages: false });
+        const ch = await ensureChannel(guild, g.channelName, ChannelType.GuildText, catShop.id, { readOnly: true, topic: g.topic }, stats);
         gameChannels[key] = ch;
-
-        const gameEmbed = new EmbedBuilder()
-            .setColor(COLOR_GREEN)
-            .setTitle(`${g.name} — Windows (${g.type})`)
-            .setDescription(
-                `${g.desc}\n\n` +
-                `**Estado:** 🟢 Indetectable\n` +
-                `**Arquitectura:** \`${g.type}\`\n\n` +
-                `**Precios Oficiales:**\n` +
-                `• 1 Día: \`$1.50 USD\`\n` +
-                `• 7 Días: \`$6 USD\`\n` +
-                `• 30 Días: \`$12 USD\`\n` +
-                `• 90 Días: \`$25 USD\`\n\n` +
-                `🔗 **Ver gameplay y funciones:** ${WEB_URL}/juego?id=${g.slug}`
-            )
-            .setFooter({ text: 'DrakoStore • Prueba 1 día gratis disponible' });
-
-        const gameButtons = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('open_trial_menu')
-                .setLabel('Probar 1 Día Gratis')
-                .setStyle(ButtonStyle.Success),
-            new ButtonBuilder()
-                .setCustomId('open_buy_ticket')
-                .setLabel('Comprar Acceso')
-                .setStyle(ButtonStyle.Secondary)
-        );
-
-        await ch.send({ embeds: [gameEmbed], components: [gameButtons] });
+        await upsertBotMessage(ch, buildGamePayload(key, g));
     }
 
-    // 4) CATEGORIA: NOVEDADES · NEWS
-    const catNews = await guild.channels.create({ name: '📢 NOVEDADES · NEWS', type: ChannelType.GuildCategory });
-    const chAnnouncements = await guild.channels.create({ name: '📢｜announcements', type: ChannelType.GuildText, parent: catNews.id });
-    const chUpdates = await guild.channels.create({ name: '🚀｜updates', type: ChannelType.GuildText, parent: catNews.id });
+    // 4) NOVEDADES · NEWS
+    const catNews = await ensureCategory(guild, '📢 NOVEDADES · NEWS', null, stats);
+    await ensureChannel(guild, '📢｜announcements', ChannelType.GuildText, catNews.id, { readOnly: true, topic: 'Anuncios oficiales de DrakoStore' }, stats);
+    const chUpdates = await ensureChannel(guild, '🚀｜updates', ChannelType.GuildText, catNews.id, { readOnly: true, topic: 'Registro de actualizaciones y parches' }, stats);
 
-    // 5) CATEGORIA: COMUNIDAD · COMMUNITY
-    const catComm = await guild.channels.create({ name: '💬 COMUNIDAD · COMMUNITY', type: ChannelType.GuildCategory });
-    const chSupport = await guild.channels.create({ name: '🎫｜support', type: ChannelType.GuildText, parent: catComm.id });
-    await guild.channels.create({ name: '💬｜general', type: ChannelType.GuildText, parent: catComm.id });
+    // 5) COMUNIDAD · COMMUNITY
+    const catComm = await ensureCategory(guild, '💬 COMUNIDAD · COMMUNITY', null, stats);
+    const chSupport = await ensureChannel(guild, '🎫｜support', ChannelType.GuildText, catComm.id, { readOnly: true, topic: 'Abre ticket de compra, soporte o reclama 1 día gratis' }, stats);
+    await ensureChannel(guild, '💬｜general', ChannelType.GuildText, catComm.id, { topic: 'Chat general de la comunidad DrakoStore' }, stats);
 
-    // 6) CATEGORIA PRIVADA: STAFF
-    const catStaff = await guild.channels.create({
-        name: '🔒 STAFF',
-        type: ChannelType.GuildCategory,
-        permissionOverwrites: [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }]
-    });
-    await guild.channels.create({ name: 'staff-aprobaciones', type: ChannelType.GuildText, parent: catStaff.id });
+    // 6) STAFF PRIVADO
+    const catStaff = await ensureCategory(
+        guild,
+        '🔒 STAFF',
+        [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }],
+        stats
+    );
+    await ensureChannel(guild, 'staff-aprobaciones', ChannelType.GuildText, catStaff.id, { topic: 'Panel privado para aprobar capturas de 1 día gratis' }, stats);
 
-    // Solo lectura para canales informativos
-    for (const ch of [chWelcome, chStatus, chBuy, chGuide, chRules, chAnnouncements, chUpdates, chSupport]) {
-        await ch.permissionOverwrites.edit(guild.id, { SendMessages: false });
-    }
+    // ==================== ACTUALIZAR PANELES PRINCIPALES ====================
 
-    // --- EMBED: STATUS EN VIVO (ESTILO LIMPIO POR ARQUITECTURA) ---
+    // A) STATUS EN VIVO
     const unixNow = Math.floor(Date.now() / 1000);
-    const statusEmbed = new EmbedBuilder()
-        .setColor(COLOR_GREEN)
-        .setTitle('✅ Todo funcionando · All working')
-        .setDescription(
-            `🔄 Actualizado <t:${unixNow}:R>\n` +
-            `──────────────────────────\n\n` +
-            `**💉 PC · Internals (Windows)**\n` +
-            `✅ **Free Fire** — ${gameChannels['free-fire']}\n` +
-            `✅ **Counter-Strike 2** — ${gameChannels['cs2']}\n` +
-            `✅ **Roblox** — ${gameChannels['roblox']}\n\n` +
-            `──────────────────────────\n\n` +
-            `**⚡ PC · Kernel (Windows)**\n` +
-            `✅ **ROB RUN** — ${gameChannels['robrun']}\n` +
-            `✅ **Minecraft Java** — ${gameChannels['minecraft']}\n\n` +
-            `──────────────────────────\n` +
-            `🌐 Catálogo oficial: ${WEB_URL}`
-        )
-        .setFooter({ text: 'DrakoStore • Live Status' });
+    const statusEmbeds = [];
+    if (STATUS_BANNER_URL) {
+        statusEmbeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(STATUS_BANNER_URL));
+    }
+    statusEmbeds.push(
+        new EmbedBuilder()
+            .setColor(COLOR_GREEN)
+            .setTitle('✅ Todo funcionando · All working')
+            .setDescription(
+                `🔄 <t:${unixNow}:R>\n` +
+                `──────────────────────────\n\n` +
+                `**💉 PC · Internals (Windows)**\n` +
+                `✅ **Free Fire** — ${gameChannels['free-fire']}\n` +
+                `✅ **Counter-Strike 2** — ${gameChannels['cs2']}\n` +
+                `✅ **Roblox** — ${gameChannels['roblox']}\n\n` +
+                `──────────────────────────\n\n` +
+                `**⚡ PC · Kernel (Windows)**\n` +
+                `✅ **ROB RUN** — ${gameChannels['robrun']}\n` +
+                `✅ **Minecraft Java** — ${gameChannels['minecraft']}\n\n` +
+                `──────────────────────────\n` +
+                `🌐 Catálogo oficial: ${WEB_URL}`
+            )
+            .setFooter({ text: 'DrakoStore • Live Status' })
+    );
+    await upsertBotMessage(chStatus, { embeds: statusEmbeds });
 
-    if (STATUS_BANNER_URL) statusEmbed.setImage(STATUS_BANNER_URL);
-    await chStatus.send({ embeds: [statusEmbed] });
-
-    // --- EMBED: HOW TO BUY ---
-    await chBuy.send({
+    // B) HOW TO BUY
+    await upsertBotMessage(chBuy, {
         embeds: [
             new EmbedBuilder()
                 .setColor(COLOR_GREEN)
                 .setTitle('💳 Cómo comprar · How to buy')
                 .setDescription(
                     `**Precios unificados para todos los juegos (Windows):**\n` +
-                    `• **1 Día:** \`$1.50 USD\`\n` +
-                    `• **7 Días:** \`$6 USD\`\n` +
-                    `• **30 Días:** \`$12 USD\`\n` +
-                    `• **90 Días:** \`$25 USD\`\n\n` +
+                    `\`1 día  · day  \` **$1.50 USD**\n` +
+                    `\`7 días · days \` **$6 USD** ⭐\n` +
+                    `\`30 días · days\` **$12 USD**\n` +
+                    `\`90 días · days\` **$25 USD**\n\n` +
                     `**Métodos aceptados:** Yape · Plin · Binance Pay (USDT) · PayPal\n` +
-                    `**Paso a paso:** Ve a ${chSupport}, abre un ticket de compra, envía tu comprobante y recibe tu key al instante.`
+                    `**Paso a paso:** Entra al canal del juego o a ${chSupport}, abre tu ticket, envía el comprobante y recibe tu key al instante.`
                 )
         ]
     });
 
-    // --- EMBED: GUIDE ---
-    await chGuide.send({
-        embeds: [
-            new EmbedBuilder()
-                .setColor(COLOR_GREEN)
-                .setTitle('📖 Guía rápida de inicio')
-                .setDescription(
-                    `1. Descarga el loader oficial que te enviaremos en tu ticket.\n` +
-                    `2. Desactiva temporalmente la protección en tiempo real si Windows bloquea el driver.\n` +
-                    `3. Introduce tu key personal y abre tu juego.\n` +
-                    `4. Si necesitas ayuda, abre un ticket en ${chSupport}.`
-                )
-        ]
-    });
+    // C) GUIDE (ESTILO ZONA CLIENTES VIP)
+    const guideEmbeds = [];
+    if (GUIDE_BANNER_URL) {
+        guideEmbeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(GUIDE_BANNER_URL));
+    }
+    guideEmbeds.push(
+        new EmbedBuilder()
+            .setColor(COLOR_GREEN)
+            .setTitle('📖 Zona Clientes — Guía de Inicio')
+            .setDescription(
+                `Gracias por confiar en **DrakoStore**. Aquí tienes todo para empezar en Windows, sea cual sea tu producto.\n\n` +
+                `🔑 **1 · Recibe tu key y el programa**\n` +
+                `Cuando confirmamos tu pago (o aprobamos tu prueba de 1 día gratis), el bot te envía tu **key por mensaje privado (DM)**.\n` +
+                `• Mantén abiertos los mensajes directos del servidor.\n` +
+                `• Los días cuentan desde que activas la key por primera vez.\n\n` +
+                `💻 **2 · Instalación en Windows (Internal y Kernel)**\n` +
+                `1. Descarga el loader oficial desde el enlace de tu ticket.\n` +
+                `2. Clic derecho → **Ejecutar como administrador**.\n` +
+                `3. Pega tu key. El loader valida la licencia, se actualiza solo y en los **Kernel** carga el driver automáticamente.\n` +
+                `4. Pon el juego en **Ventana sin bordes** y presiona **INSERT** para abrir o cerrar el menú.\n\n` +
+                `🔄 **Actualizaciones**\n` +
+                `Los programas se actualizan solos al abrirlos. Revisa siempre ${chStatus} y las novedades en ${chUpdates}.\n\n` +
+                `🛠️ **Si algo no anda**\n` +
+                `• Abre siempre el loader como **Administrador**.\n` +
+                `• Agrega la carpeta del programa como exclusión en Windows Defender.\n` +
+                `• Usa el juego en Ventana o Ventana sin bordes para ver el menú.\n` +
+                `• **Kernel:** si el driver no carga, reinicia tu PC e inténtalo de nuevo.\n\n` +
+                `🔒 **Tu key es personal**\n` +
+                `\`1 key = 1 PC\`. No la compartas. Si cambias de equipo, abre un ticket de soporte abajo.\n` +
+                `⭐ Cuéntanos tu experiencia en ${chVouches}.`
+            )
+            .setFooter({ text: 'DrakoStore • Customer Guide (Windows)' })
+    );
 
-    // --- EMBED: RULES ---
-    await chRules.send({
+    const guideRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('open_support_ticket')
+            .setLabel('Ticket de Soporte')
+            .setEmoji('🎫')
+            .setStyle(ButtonStyle.Secondary)
+    );
+    await upsertBotMessage(chGuide, { embeds: guideEmbeds, components: [guideRow] });
+
+    // D) RULES
+    await upsertBotMessage(chRules, {
         embeds: [
             new EmbedBuilder()
                 .setColor(COLOR_GREEN)
@@ -676,35 +1122,50 @@ async function buildServer(guild) {
                     `1. Respeto total hacia miembros y staff.\n` +
                     `2. Prohibido enviar enlaces, spam o publicidad externa.\n` +
                     `3. La prueba de 1 día gratis es única por persona.\n` +
-                    `4. Todas las compras se atienden únicamente en ${chSupport}.`
+                    `4. Todas las compras y soporte se atienden únicamente mediante ticket.`
                 )
         ]
     });
 
-    // --- PANEL EN 🎫｜support (1 DIA GRATIS + COMPRA) ---
-    const supportEmbed = new EmbedBuilder()
-        .setColor(COLOR_GREEN)
-        .setTitle('🎫 Centro de Soporte y Prueba Gratis')
-        .setDescription(
-            `**🎁 ¿Quieres 1 Día Gratis?**\n` +
-            `Haz clic en **Pedir 1 Día Gratis**, elige tu juego y sube tu captura siguiendo nuestras redes y dando like. Al aprobarse, **el bot te enviará la key por privado**.\n\n` +
-            `**💳 ¿Listo para comprar?**\n` +
-            `Haz clic en **Abrir Ticket de Compra** para pagar con Yape, Plin, Binance o PayPal.`
-        );
-    if (BANNER_URL) supportEmbed.setImage(BANNER_URL);
+    // E) PANEL DE SOPORTE Y PRUEBA GRATIS
+    const supportEmbeds = [];
+    if (BANNER_URL) {
+        supportEmbeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(BANNER_URL));
+    }
+    supportEmbeds.push(
+        new EmbedBuilder()
+            .setColor(COLOR_GREEN)
+            .setTitle('🎫 Centro de Soporte, Compras y 1 Día Gratis')
+            .setDescription(
+                `🎁 **¿Quieres 1 Día Gratis?**\n` +
+                `Presiona **Pedir 1 Día Gratis**, elige tu juego y sube tu captura siguiendo nuestras redes y dando like. Al aprobarse, **el bot te enviará la key por privado**.\n\n` +
+                `🛒 **¿Listo para comprar?**\n` +
+                `Presiona **Ticket de Compra** para pagar con Yape, Plin, Binance o PayPal.\n\n` +
+                `🛠️ **¿Necesitas ayuda técnica?**\n` +
+                `Presiona **Soporte Técnico** y un administrador te asistirá.`
+            )
+    );
 
     const supportRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId('open_trial_menu')
             .setLabel('Pedir 1 Día Gratis')
+            .setEmoji('🎁')
             .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
             .setCustomId('open_buy_ticket')
-            .setLabel('Abrir Ticket de Compra')
-            .setStyle(ButtonStyle.Primary)
+            .setLabel('Ticket de Compra')
+            .setEmoji('🛒')
+            .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+            .setCustomId('open_support_ticket')
+            .setLabel('Soporte Técnico')
+            .setEmoji('🛠️')
+            .setStyle(ButtonStyle.Secondary)
     );
+    await upsertBotMessage(chSupport, { embeds: supportEmbeds, components: [supportRow] });
 
-    await chSupport.send({ embeds: [supportEmbed], components: [supportRow] });
+    return stats;
 }
 
 client.login(process.env.DISCORD_TOKEN);
