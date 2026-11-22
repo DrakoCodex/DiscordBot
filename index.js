@@ -28,7 +28,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.status(200).send('DrakoStore Bot v3.1 Online 24/7');
+    res.status(200).send('DrakoStore Bot v3.2 Online 24/7');
 });
 
 app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`));
@@ -878,12 +878,21 @@ async function ensureChannel(guild, name, type, parentId, { readOnly = false, to
     return ch;
 }
 
+const IS_COMPONENTS_V2 = 1 << 15; // 32768 - Discord Components V2
+
 // Edita el mensaje existente del bot en el canal o envia uno nuevo si no existe
 async function upsertBotMessage(channel, payload) {
     try {
         const messages = await channel.messages.fetch({ limit: 15 });
         const existing = messages.find(m => m.author.id === client.user.id);
         if (existing) {
+            const wantsV2 = Boolean(payload.flags && (payload.flags & IS_COMPONENTS_V2));
+            const isV2 = Boolean(existing.flags?.bitfield && (existing.flags.bitfield & IS_COMPONENTS_V2));
+            if (wantsV2 !== isV2) {
+                // Discord no permite cambiar de Embed clasico a Components V2 editando: reemplazamos el mensaje
+                await existing.delete().catch(() => {});
+                return channel.send(payload);
+            }
             await existing.edit(payload);
             return existing;
         }
@@ -895,65 +904,120 @@ function buildGamePayload(key, g) {
     const unixNow = Math.floor(Date.now() / 1000);
     const topBanner = process.env[g.bannerEnv] || '';
     const menuImg = process.env[g.menuEnv] || '';
-    const embeds = [];
 
-    // Embed superior dedicado al GIF/Banner (si esta configurado en Render)
+    const containerItems = [];
+
+    // 1) Banner/GIF superior dentro del mismo contenedor
     if (topBanner) {
-        embeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(topBanner));
+        containerItems.push({
+            type: 12, // MediaGallery
+            items: [{ media: { url: topBanner } }]
+        });
+        containerItems.push({ type: 14, divider: true, spacing: 1 });
     }
 
-    const mainEmbed = new EmbedBuilder()
-        .setColor(COLOR_GREEN)
-        .setTitle(`🟢 DrakoStore · ${g.name}`)
-        .setDescription(
-            `🛡️ **${g.tagline}**\n` +
-            `${g.desc}\n\n` +
-            `✅ **Funcionando · Working** · \`Windows · ${g.type}\` · 🔄 <t:${unixNow}:R>\n\n` +
-            `✨ **Funciones · Features**\n` +
-            `${g.shortFeatures.join('\n')}\n\n` +
-            `💰 **Planes · Plans**\n` +
+    // 2) Titulo, descripcion y estado en vivo
+    containerItems.push({
+        type: 10, // TextDisplay
+        content:
+            `### 🟢 DrakoStore · ${g.name}\n` +
+            `${g.desc}\n` +
+            `-# 🛡️ ${g.tagline}\n\n` +
+            `✅ **Funcionando · Working** · \`Windows · ${g.type}\` · 🔄 <t:${unixNow}:R>`
+    });
+
+    containerItems.push({ type: 14, divider: true, spacing: 1 });
+
+    // 3) Funciones resumidas
+    containerItems.push({
+        type: 10,
+        content:
+            `**✨ Funciones · Features**\n` +
+            `${g.shortFeatures.join('\n')}`
+    });
+
+    containerItems.push({ type: 14, divider: true, spacing: 1 });
+
+    // 4) Planes y precios
+    containerItems.push({
+        type: 10,
+        content:
+            `**💰 Planes · Plans**\n` +
             `\`1 día  · day  \` **$1.50 USD**\n` +
             `\`7 días · days \` **$6 USD** ⭐\n` +
             `\`30 días · days\` **$12 USD**\n` +
             `\`90 días · days\` **$25 USD**\n` +
-            `🎁 **Prueba gratis 1 día · 1-day free trial**\n\n` +
-            `🌐 **Ver demo en vivo:** ${WEB_URL}/juego?id=${g.slug}`
-        )
-        .setFooter({ text: `⚡ ${g.type} (Windows) · 1 key = 1 PC · auto-updates` });
+            `🎁 **Prueba gratis 1 día · 1-day free trial**`
+    });
 
+    // 5) Captura del menu dentro del mismo contenedor
     if (menuImg) {
-        mainEmbed.setImage(menuImg);
+        containerItems.push({ type: 14, divider: true, spacing: 1 });
+        containerItems.push({
+            type: 12,
+            items: [{ media: { url: menuImg } }]
+        });
     }
 
-    embeds.push(mainEmbed);
+    containerItems.push({ type: 14, divider: true, spacing: 1 });
 
-    const row1 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`buy_direct_${key}`)
-            .setLabel('Comprar · Buy')
-            .setEmoji('🛒')
-            .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId(`trial_direct_${key}`)
-            .setLabel('Prueba gratis · Free trial')
-            .setEmoji('🎁')
-            .setStyle(ButtonStyle.Primary)
-    );
+    // 6) Botones interactivos DENTRO del contenedor
+    containerItems.push({
+        type: 1, // ActionRow
+        components: [
+            {
+                type: 2,
+                style: ButtonStyle.Success,
+                custom_id: `buy_direct_${key}`,
+                label: 'Comprar · Buy',
+                emoji: { name: '🛒' }
+            },
+            {
+                type: 2,
+                style: ButtonStyle.Primary,
+                custom_id: `trial_direct_${key}`,
+                label: 'Prueba gratis · Free trial',
+                emoji: { name: '🎁' }
+            }
+        ]
+    });
 
-    const row2 = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId(`info_features_${key}`)
-            .setLabel('Funciones · Features')
-            .setEmoji('📋')
-            .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-            .setCustomId('info_payments')
-            .setLabel('Pagos · Payment')
-            .setEmoji('💳')
-            .setStyle(ButtonStyle.Secondary)
-    );
+    containerItems.push({
+        type: 1, // ActionRow
+        components: [
+            {
+                type: 2,
+                style: ButtonStyle.Secondary,
+                custom_id: `info_features_${key}`,
+                label: 'Funciones · Features',
+                emoji: { name: '📋' }
+            },
+            {
+                type: 2,
+                style: ButtonStyle.Secondary,
+                custom_id: 'info_payments',
+                label: 'Pagos · Payment',
+                emoji: { name: '💳' }
+            }
+        ]
+    });
 
-    return { embeds, components: [row1, row2] };
+    // 7) Footer compacto debajo de los botones (dentro de la tarjeta)
+    containerItems.push({
+        type: 10,
+        content: `-# ⚡ ${g.type} (Windows) · 1 key = 1 PC · auto-updates · ${WEB_URL}/juego?id=${g.slug}`
+    });
+
+    return {
+        flags: IS_COMPONENTS_V2,
+        components: [
+            {
+                type: 17, // Container
+                accent_color: COLOR_GREEN,
+                components: containerItems
+            }
+        ]
+    };
 }
 
 async function syncServer(guild) {
@@ -1168,22 +1232,4 @@ async function syncServer(guild) {
     return stats;
 }
 
-client.on('error', err => console.error('[CLIENT ERROR]', err));
-client.on('shardError', err => console.error('[SHARD ERROR]', err));
-client.on('warn', msg => console.warn('[WARN]', msg));
-client.rest.on('rateLimited', info => console.warn('[RATE LIMIT]', info));
-
-(async () => {
-    try {
-        console.log('[DIAG] Token cargado:', Boolean(process.env.DISCORD_TOKEN));
-        const res = await fetch('https://discord.com/api/v10/gateway');
-        console.log('[DIAG] Discord API HTTP status:', res.status, res.statusText);
-        if (res.status === 429) {
-            console.error('[DIAG] IP de Render bloqueada por Discord/Cloudflare (429). Retry-After:', res.headers.get('retry-after'));
-        }
-        await client.login(process.env.DISCORD_TOKEN);
-        console.log('[DIAG] client.login() completado.');
-    } catch (err) {
-        console.error('[LOGIN ERROR]', err);
-    }
-})();
+client.login(process.env.DISCORD_TOKEN);
