@@ -1,7 +1,7 @@
 {
   "name": "drakostore-bot",
-  "version": "2.0.0",
-  "description": "Bot DrakoStore: Setup completo estilo tienda, canal de voz 24/7 Soporte en linea, AutoMod y aprobacion de 1 dia gratis",
+  "version": "3.1.0",
+  "description": "Bot DrakoStore v3: Setup/Update sin duplicados, embeds estilo tienda con banners/imagenes, voz 24/7, AutoMod y 1 dia gratis",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
