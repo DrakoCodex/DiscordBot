@@ -1168,4 +1168,22 @@ async function syncServer(guild) {
     return stats;
 }
 
-client.login(process.env.DISCORD_TOKEN);
+client.on('error', err => console.error('[CLIENT ERROR]', err));
+client.on('shardError', err => console.error('[SHARD ERROR]', err));
+client.on('warn', msg => console.warn('[WARN]', msg));
+client.rest.on('rateLimited', info => console.warn('[RATE LIMIT]', info));
+
+(async () => {
+    try {
+        console.log('[DIAG] Token cargado:', Boolean(process.env.DISCORD_TOKEN));
+        const res = await fetch('https://discord.com/api/v10/gateway');
+        console.log('[DIAG] Discord API HTTP status:', res.status, res.statusText);
+        if (res.status === 429) {
+            console.error('[DIAG] IP de Render bloqueada por Discord/Cloudflare (429). Retry-After:', res.headers.get('retry-after'));
+        }
+        await client.login(process.env.DISCORD_TOKEN);
+        console.log('[DIAG] client.login() completado.');
+    } catch (err) {
+        console.error('[LOGIN ERROR]', err);
+    }
+})();
