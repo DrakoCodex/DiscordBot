@@ -1,29 +1,22 @@
-# DrakoStore Bot v2 (Open Source Ready)
+# DrakoStore Bot v3.1
 
-Bot diseñado para dejar el repositorio público en GitHub de forma segura (todas las credenciales se cargan desde **Environment** en Render).
+Bot diseñado para dejar el código público en GitHub y configurar todo desde **Render (Environment)**.
 
-## Qué hace este bot
-1. **`/setup`**: Construye toda la estructura del servidor:
-   - `📌 INICIO · START`: `👋｜welcome`, `📊｜status`, `💳｜how-to-buy`, `⭐｜vouches`, `📖｜guide`, `📜｜rules`
-   - `🛒 TIENDA · SHOP`: `🟢｜free-fire`, `🟢｜cs2`, `🟢｜roblox`, `🟢｜robrun`, `🟢｜minecraft` (con precios, tipo Kernel/Internal y botón de prueba gratis)
-   - `📢 NOVEDADES · NEWS`: `📢｜announcements`, `🚀｜updates`
-   - `💬 COMUNIDAD · COMMUNITY`: `🎫｜support` (panel de 1 Día Gratis + Ticket de Compra), `💬｜general`
-   - Canal de voz bloqueado **`🟢 Soporte en línea`**: el bot se conecta automáticamente y permanece **24/7** (con reconexión automática).
-   - Categoría privada `🔒 STAFF`: `staff-aprobaciones` para aprobar capturas con un clic.
-2. **Estado en vivo (`📊｜status`)**: Publica el tablero dividido en **PC · Kernel** y **PC · Internals** con menciones clicables a cada canal de juego.
-3. **1 Día Gratis automático**: El usuario abre su ticket, sube captura siguiendo tus redes/likes, el bot la manda a `#staff-aprobaciones` y al darle a **Aprobar**, le envía una key al privado (DM).
-4. **Auto-Moderación**: Anti-enlaces, anti-spam y bienvenida automática.
-5. **Keep-Alive HTTP**: Puerto Express abierto para UptimeRobot.
+## Novedades de la v3.1
+- **Jerarquía de roles automática (`/setup` y `/update`):** Crea, ordena y asigna sin duplicados:
+  1. `👑 Owner` (separado arriba, permisos de Administrador, auto-asignado al dueño).
+  2. `🤝 Partner` (separado).
+  3. `🤖 Bots` (separado, auto-asignado a todos los bots existentes y nuevos).
+  4. `💎 Clientes` (separado, migra `Cliente VIP` si existía).
+  5. `Miembro` (`hoist: false`, auto-asignado a usuarios normales para que los no clientes aparezcan bajo **En línea**).
+- **`/setup` y `/update` inteligentes (sin duplicados):** Verifican qué roles, categorías y canales ya existen. No crean nada por encima; solo crean lo que falte, corrigen permisos y **editan los mensajes existentes** con tus nuevas imágenes o textos.
+- **Canales de Tienda profesionales:** Cada juego tiene espacio para **Banner/GIF superior**, descripción, estado con hora dinámica, lista de funciones, bloque de precios (`$1.50`, `$6`, `$12`, `$25`), **captura del menú abajo** y 4 botones interactivos (`Comprar`, `Prueba gratis`, `Funciones`, `Pagos`).
+- **Guía VIP (`📖｜guide`):** Formato completo para clientes en Windows (Kernel e Internal) con banner superior y botón directo de Ticket de Soporte.
+- **Canal de voz 24/7 (`🟢 Soporte en línea`):** Bloqueado para usuarios, el bot se mantiene conectado permanentemente.
+- **Sistema de 1 Día Gratis:** Detecta la captura en el ticket, la envía a `#staff-aprobaciones` y al aprobar manda la key por DM.
 
-## Variables de entorno en Render
-- `DISCORD_TOKEN`: Token del bot
-- `CLIENT_ID`: Application ID del bot
-- `GUILD_ID`: ID de tu servidor de Discord
-- `WEB_URL`: `https://drakostore.xyz`
-- `BANNER_URL`: (Opcional) URL de tu banner/GIF verde para bienvenida y paneles
-- `STATUS_BANNER_URL`: (Opcional) URL del banner superior para el canal de status
+## Cómo agregar tus imágenes/GIFs sin tocar código
+1. Sube tus imágenes o GIFs a un canal privado de tu Discord (o Imgur), haz clic derecho -> **Copiar enlace**.
+2. Pégalos en Render -> **Environment** usando las variables de `.env.example` (por ejemplo `GUIDE_BANNER_URL`, `IMG_CS2_BANNER`, `IMG_CS2_MENU`).
+3. Cuando Render reinicie, ejecuta `/update` en tu servidor y el bot actualizará todos los embeds al instante sin borrar ni duplicar canales.
 
-## Permisos en Discord Developer Portal
-Activa en **Bot -> Privileged Gateway Intents**:
-- Server Members Intent
-- Message Content Intent
