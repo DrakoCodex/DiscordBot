@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const {
     Client,
@@ -28,7 +29,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-    res.status(200).send('DrakoStore Bot v3.2 Online 24/7');
+    res.status(200).send('DrakoStore Bot v3.4 Online 24/7');
 });
 
 app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`));
@@ -40,6 +41,104 @@ const BANNER_URL = process.env.BANNER_URL || '';
 const STATUS_BANNER_URL = process.env.STATUS_BANNER_URL || BANNER_URL;
 const GUIDE_BANNER_URL = process.env.GUIDE_BANNER_URL || BANNER_URL;
 const VOICE_CHANNEL_NAME = '🟢 Soporte en línea';
+
+// ==================== SUPABASE LICENCIAS (KEY SYSTEM AUTOMATICO) ====================
+const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://soykyouvyromdkqvkewp.supabase.co').replace(/\/$/, '');
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const DEFAULT_LOADER_URL = process.env.LOADER_URL || `${WEB_URL}/descargas`;
+
+const GAME_PREFIXES = {
+    'free-fire': 'FF',
+    'cs2': 'CS2',
+    'roblox': 'RBX',
+    'robrun': 'RR',
+    'minecraft': 'MC'
+};
+
+const GAME_LOADER_ENV = {
+    'free-fire': 'LOADER_FF_URL',
+    'cs2': 'LOADER_CS2_URL',
+    'roblox': 'LOADER_ROBLOX_URL',
+    'robrun': 'LOADER_ROBRUN_URL',
+    'minecraft': 'LOADER_MC_URL'
+};
+
+const PLAN_LABELS = {
+    1: '1 Día ($1.50 USD)',
+    7: '7 Días ($6 USD)',
+    30: '30 Días ($12 USD)',
+    90: '90 Días ($25 USD)'
+};
+
+function getLoaderUrl(gameKey) {
+    const envName = GAME_LOADER_ENV[gameKey];
+    return (envName && process.env[envName]) || DEFAULT_LOADER_URL;
+}
+
+function generateRandomKey(gameKey) {
+    const prefix = GAME_PREFIXES[gameKey] || 'DS';
+    const part1 = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const part2 = crypto.randomBytes(2).toString('hex').toUpperCase();
+    const part3 = crypto.randomBytes(2).toString('hex').toUpperCase();
+    return `${prefix}-${part1}-${part2}-${part3}`;
+}
+
+async function createLicenseInSupabase({ gameKey, durationDays, discordUserId = null }) {
+    if (!SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error('Falta configurar SUPABASE_SERVICE_ROLE_KEY en Render (Environment).');
+    }
+
+    const key = generateRandomKey(gameKey);
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/licenses`, {
+        method: 'POST',
+        headers: {
+            'apikey': SUPABASE_SERVICE_ROLE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+            key,
+            game: gameKey,
+            duration_days: durationDays,
+            status: 'active',
+            discord_user_id: discordUserId
+        })
+    });
+
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Error Supabase (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    return Array.isArray(data) ? data[0] : { key, game: gameKey, duration_days: durationDays };
+}
+
+async function resetHwidInSupabase(key) {
+    if (!SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error('Falta configurar SUPABASE_SERVICE_ROLE_KEY en Render (Environment).');
+    }
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/licenses?key=eq.${encodeURIComponent(key.trim())}`, {
+        method: 'PATCH',
+        headers: {
+            'apikey': SUPABASE_SERVICE_ROLE_KEY,
+            'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({ hwid: null })
+    });
+
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Error Supabase (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+    return Array.isArray(data) ? data[0] : null;
+}
 
 // Jerarquia de roles en la barra derecha (de arriba hacia abajo)
 // hoist: true = seccion separada | hoist: false = aparece en "En linea" (usuarios no clientes)
@@ -215,14 +314,7 @@ const GAMES = {
     }
 };
 
-// Stock en memoria para pruebas de 1 dia (se carga con /addkeys)
-const keyStock = {
-    'free-fire': [],
-    'cs2': [],
-    'roblox': [],
-    'robrun': [],
-    'minecraft': []
-};
+// Las keys se generan automaticamente en Supabase (tabla licenses)
 
 const claimedUsers = new Set();
 const activeTrialTickets = new Map();
@@ -290,12 +382,12 @@ const commands = [
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     new SlashCommandBuilder()
-        .setName('addkeys')
-        .setDescription('Agrega keys de prueba de 1 dia al stock del bot')
+        .setName('genkey')
+        .setDescription('Genera una key en Supabase segun juego y plan y la entrega con el link del loader')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(opt =>
             opt.setName('juego')
-                .setDescription('Juego de las keys')
+                .setDescription('Juego para el que sirve la key')
                 .setRequired(true)
                 .addChoices(
                     { name: 'Free Fire (Internal)', value: 'free-fire' },
@@ -305,16 +397,32 @@ const commands = [
                     { name: 'Minecraft Java (Kernel)', value: 'minecraft' }
                 )
         )
-        .addStringOption(opt =>
-            opt.setName('keys')
-                .setDescription('Keys separadas por comas (ej: KEY-1, KEY-2)')
+        .addIntegerOption(opt =>
+            opt.setName('plan')
+                .setDescription('Duracion de la licencia')
                 .setRequired(true)
+                .addChoices(
+                    { name: '1 Día ($1.50 USD)', value: 1 },
+                    { name: '7 Días ($6 USD)', value: 7 },
+                    { name: '30 Días ($12 USD)', value: 30 },
+                    { name: '90 Días ($25 USD)', value: 90 }
+                )
+        )
+        .addUserOption(opt =>
+            opt.setName('cliente')
+                .setDescription('Cliente al que se entrega (opcional, le asigna rol Clientes)')
+                .setRequired(false)
         ),
 
     new SlashCommandBuilder()
-        .setName('stock')
-        .setDescription('Muestra cuantas keys de prueba quedan disponibles')
+        .setName('resethwid')
+        .setDescription('Resetea el HWID de una key en Supabase para que el cliente pueda usarla en otra PC')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(opt =>
+            opt.setName('key')
+                .setDescription('Key exacta a resetear (ej: CS2-A1B2-C3D4-E5F6)')
+                .setRequired(true)
+        )
 ].map(c => c.toJSON());
 
 client.once('clientReady', async () => {
@@ -332,7 +440,7 @@ client.once('clientReady', async () => {
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
-            console.log('[BOT] Slash commands registrados (/setup, /update, /addkeys, /stock).');
+            console.log('[BOT] Slash commands registrados (/setup, /update, /genkey, /resethwid).');
         } catch (err) {
             console.error('[ERROR] Registrando comandos:', err);
         }
@@ -401,7 +509,7 @@ client.on('messageCreate', async (message) => {
                     .addFields(
                         { name: 'Usuario', value: `<@${ticketInfo.userId}> (\`${message.author.tag}\`)`, inline: true },
                         { name: 'Juego', value: `${game.name} (${game.type})`, inline: true },
-                        { name: 'Stock actual', value: `${keyStock[ticketInfo.gameKey].length} keys`, inline: true }
+                        { name: 'Generación', value: 'Automática (Supabase 1 día)', inline: true }
                     )
                     .setImage(attachment.url)
                     .setTimestamp();
@@ -559,25 +667,68 @@ client.on('interactionCreate', async (interaction) => {
                 );
             }
 
-            if (interaction.commandName === 'addkeys') {
+            if (interaction.commandName === 'genkey') {
+                await interaction.deferReply();
                 const gameKey = interaction.options.getString('juego');
-                const rawKeys = interaction.options.getString('keys')
-                    .split(',')
-                    .map(k => k.trim())
-                    .filter(Boolean);
+                const durationDays = interaction.options.getInteger('plan');
+                const targetUser = interaction.options.getUser('cliente');
+                const game = GAMES[gameKey];
+                const loaderUrl = getLoaderUrl(gameKey);
 
-                keyStock[gameKey].push(...rawKeys);
-                return interaction.reply({
-                    content: `Se agregaron **${rawKeys.length}** keys a **${GAMES[gameKey].name}**. Stock total: **${keyStock[gameKey].length}**.`,
-                    ephemeral: true
-                });
+                try {
+                    const lic = await createLicenseInSupabase({
+                        gameKey,
+                        durationDays,
+                        discordUserId: targetUser?.id || null
+                    });
+
+                    // Si se menciono un cliente, asignarle el rol 💎 Clientes automaticamente
+                    if (targetUser && interaction.guild) {
+                        const member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+                        const clientRole = interaction.guild.roles.cache.find(r => r.name === '💎 Clientes');
+                        if (member && clientRole && clientRole.editable && !member.roles.cache.has(clientRole.id)) {
+                            await member.roles.add(clientRole).catch(() => {});
+                        }
+                    }
+
+                    const embed = new EmbedBuilder()
+                        .setColor(COLOR_GREEN)
+                        .setTitle(`🔑 Licencia Generada — ${game.name} (${game.type})`)
+                        .setDescription(
+                            `${targetUser ? `Hola ${targetUser}, aquí tienes tu licencia lista para usar:\n\n` : ''}` +
+                            `**🎮 Juego:** ${game.name} (\`${game.type}\`)\n` +
+                            `**⏳ Plan:** ${PLAN_LABELS[durationDays] || `${durationDays} días`}\n` +
+                            `**🔑 Tu Key:**\n\`\`\`${lic.key}\`\`\`\n` +
+                            `**📥 Descargar Loader:** ${loaderUrl}\n\n` +
+                            `• Los días empiezan a contar desde que activas la key por primera vez.\n` +
+                            `• \`1 key = 1 PC\` (bloqueo automático por HWID).`
+                        )
+                        .setFooter({ text: 'DrakoStore • Licencia generada en Supabase' })
+                        .setTimestamp();
+
+                    return interaction.editReply({
+                        content: targetUser ? `${targetUser}` : undefined,
+                        embeds: [embed]
+                    });
+                } catch (err) {
+                    console.error('[GENKEY ERROR]', err);
+                    return interaction.editReply(`❌ No se pudo generar la key: \`${err.message}\``);
+                }
             }
 
-            if (interaction.commandName === 'stock') {
-                const lines = Object.entries(GAMES)
-                    .map(([k, g]) => `• **${g.name} (${g.type}):** ${keyStock[k].length} keys`)
-                    .join('\n');
-                return interaction.reply({ content: `**Stock de keys de prueba (1 día):**\n${lines}`, ephemeral: true });
+            if (interaction.commandName === 'resethwid') {
+                await interaction.deferReply({ ephemeral: true });
+                const key = interaction.options.getString('key').trim();
+                try {
+                    const updated = await resetHwidInSupabase(key);
+                    if (!updated) {
+                        return interaction.editReply(`❌ No se encontró la key \`${key}\` en Supabase.`);
+                    }
+                    return interaction.editReply(`✅ HWID reseteado correctamente para la key \`${updated.key}\` (${GAMES[updated.game]?.name || updated.game}). Ya puede activarse en una nueva PC.`);
+                } catch (err) {
+                    console.error('[RESETHWID ERROR]', err);
+                    return interaction.editReply(`❌ Error al resetear HWID: \`${err.message}\``);
+                }
             }
         }
 
@@ -675,22 +826,30 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
-        // --- STAFF: APROBAR Y ENVIAR KEY POR PRIVADO ---
+        // --- STAFF: APROBAR Y GENERAR KEY 1 DIA AUTOMATICAMENTE EN SUPABASE ---
         if (interaction.isButton() && interaction.customId.startsWith('approve_')) {
             if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
                 return interaction.reply({ content: 'Solo administradores pueden aprobar pruebas.', ephemeral: true });
             }
 
             const [, userId, gameKey, ticketChannelId] = interaction.customId.split('_');
+            const loaderUrl = getLoaderUrl(gameKey);
 
-            if (keyStock[gameKey].length === 0) {
+            let lic;
+            try {
+                lic = await createLicenseInSupabase({
+                    gameKey,
+                    durationDays: 1,
+                    discordUserId: userId
+                });
+            } catch (err) {
+                console.error('[APPROVE SUPABASE ERROR]', err);
                 return interaction.reply({
-                    content: `No quedan keys en stock para **${GAMES[gameKey].name}**. Usa \`/addkeys\` primero.`,
+                    content: `❌ No se pudo generar la key en Supabase: \`${err.message}\``,
                     ephemeral: true
                 });
             }
 
-            const key = keyStock[gameKey].shift();
             claimedUsers.add(userId);
 
             const user = await client.users.fetch(userId);
@@ -698,34 +857,38 @@ client.on('interactionCreate', async (interaction) => {
                 .setColor(COLOR_GREEN)
                 .setTitle('🎁 Tu prueba de 1 Día Gratis fue aprobada')
                 .setDescription(
-                    `Gracias por apoyar a **DrakoStore**.\n\n` +
-                    `**Juego:** ${GAMES[gameKey].name} (${GAMES[gameKey].type})\n` +
-                    `**Tu Key (24 horas):**\n\`\`\`${key}\`\`\`\n` +
+                    `Gracias por suscribirte y apoyar a **DrakoStore**.\n\n` +
+                    `**🎮 Juego:** ${GAMES[gameKey].name} (${GAMES[gameKey].type})\n` +
+                    `**🔑 Tu Key (24 horas):**\n\`\`\`${lic.key}\`\`\`\n` +
+                    `**📥 Descargar Loader:** ${loaderUrl}\n\n` +
                     `Renueva desde **$1.50 USD** en ${WEB_URL}/juego?id=${gameKey}`
                 )
                 .setTimestamp();
 
+            let dmSent = true;
             try {
                 await user.send({ embeds: [dmEmbed] });
             } catch {
-                keyStock[gameKey].unshift(key);
-                claimedUsers.delete(userId);
-                return interaction.reply({
-                    content: `No pude enviar DM a <@${userId}> (tiene los mensajes privados desactivados).`,
-                    ephemeral: true
-                });
+                dmSent = false;
             }
 
             await interaction.update({
-                content: `✅ Aprobado por ${interaction.user}. Key enviada al privado de <@${userId}>.`,
+                content: dmSent
+                    ? `✅ Aprobado por ${interaction.user}. Key \`${lic.key}\` generada en Supabase y enviada al privado de <@${userId}>.`
+                    : `✅ Aprobado por ${interaction.user}. Key \`${lic.key}\` generada en Supabase y entregada en el ticket (el usuario tenía los DMs cerrados).`,
                 components: []
             });
 
             const tCh = interaction.guild.channels.cache.get(ticketChannelId);
             if (tCh) {
-                await tCh.send(`¡Aprobado <@${userId}>! Ya envié tu key por mensaje privado (DM). Este canal se cerrará en 10 segundos.`);
-                activeTrialTickets.delete(ticketChannelId);
-                setTimeout(() => tCh.delete().catch(() => {}), 10000);
+                if (dmSent) {
+                    await tCh.send(`¡Aprobado <@${userId}>! Ya envié tu key de 24 horas y el link del loader por mensaje privado (DM). Este canal se cerrará en 10 segundos.`);
+                    activeTrialTickets.delete(ticketChannelId);
+                    setTimeout(() => tCh.delete().catch(() => {}), 10000);
+                } else {
+                    await tCh.send({ content: `¡Aprobado <@${userId}>! Como tienes los mensajes privados desactivados, te dejo tu key aquí:`, embeds: [dmEmbed] });
+                    activeTrialTickets.delete(ticketChannelId);
+                }
             }
         }
 
@@ -1085,74 +1248,141 @@ async function syncServer(guild) {
     );
     await ensureChannel(guild, 'staff-aprobaciones', ChannelType.GuildText, catStaff.id, { topic: 'Panel privado para aprobar capturas de 1 día gratis' }, stats);
 
-    // ==================== ACTUALIZAR PANELES PRINCIPALES ====================
+    // ==================== ACTUALIZAR PANELES PRINCIPALES (COMPONENTS V2 UNIFICADO) ====================
 
     // A) STATUS EN VIVO
     const unixNow = Math.floor(Date.now() / 1000);
-    const statusEmbeds = [];
+    const statusItems = [];
     if (STATUS_BANNER_URL) {
-        statusEmbeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(STATUS_BANNER_URL));
+        statusItems.push({ type: 12, items: [{ media: { url: STATUS_BANNER_URL } }] });
+        statusItems.push({ type: 14, divider: true, spacing: 1 });
     }
-    statusEmbeds.push(
-        new EmbedBuilder()
-            .setColor(COLOR_GREEN)
-            .setTitle('✅ Todo funcionando · All working')
-            .setDescription(
-                `🔄 <t:${unixNow}:R>\n` +
-                `──────────────────────────\n\n` +
+    statusItems.push(
+        {
+            type: 10,
+            content:
+                `### ✅ Todo funcionando · All working\n` +
+                `🔄 Actualizado <t:${unixNow}:R>`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
                 `**💉 PC · Internals (Windows)**\n` +
                 `✅ **Free Fire** — ${gameChannels['free-fire']}\n` +
                 `✅ **Counter-Strike 2** — ${gameChannels['cs2']}\n` +
-                `✅ **Roblox** — ${gameChannels['roblox']}\n\n` +
-                `──────────────────────────\n\n` +
+                `✅ **Roblox** — ${gameChannels['roblox']}`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
                 `**⚡ PC · Kernel (Windows)**\n` +
                 `✅ **ROB RUN** — ${gameChannels['robrun']}\n` +
-                `✅ **Minecraft Java** — ${gameChannels['minecraft']}\n\n` +
-                `──────────────────────────\n` +
-                `🌐 Catálogo oficial: ${WEB_URL}`
-            )
-            .setFooter({ text: 'DrakoStore • Live Status' })
+                `✅ **Minecraft Java** — ${gameChannels['minecraft']}`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content: `-# 🌐 Catálogo oficial: ${WEB_URL} · DrakoStore Live Status`
+        }
     );
-    await upsertBotMessage(chStatus, { embeds: statusEmbeds });
+    await upsertBotMessage(chStatus, {
+        flags: IS_COMPONENTS_V2,
+        components: [{ type: 17, accent_color: COLOR_GREEN, components: statusItems }]
+    });
 
     // B) HOW TO BUY
+    const buyItems = [
+        {
+            type: 10,
+            content:
+                `### 💳 Cómo comprar · How to buy\n` +
+                `Precios unificados para todos los juegos en Windows.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
+                `**💰 Planes · Plans**\n` +
+                `\`1 día  · day  \` **$1.50 USD**\n` +
+                `\`7 días · days \` **$6 USD** ⭐\n` +
+                `\`30 días · days\` **$12 USD**\n` +
+                `\`90 días · days\` **$25 USD**`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
+                `**💳 Métodos aceptados:** Yape · Plin · Binance Pay (USDT) · PayPal\n` +
+                `**📋 Paso a paso:** Entra al canal del juego o a ${chSupport}, abre tu ticket, envía el comprobante y recibe tu key al instante.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 1,
+            components: [
+                {
+                    type: 2,
+                    style: ButtonStyle.Success,
+                    custom_id: 'open_buy_ticket',
+                    label: 'Ticket de Compra',
+                    emoji: { name: '🛒' }
+                },
+                {
+                    type: 2,
+                    style: ButtonStyle.Primary,
+                    custom_id: 'open_trial_menu',
+                    label: 'Pedir 1 Día Gratis',
+                    emoji: { name: '🎁' }
+                }
+            ]
+        },
+        {
+            type: 10,
+            content: `-# ⚡ Entrega inmediata · 1 key = 1 PC · ${WEB_URL}`
+        }
+    ];
     await upsertBotMessage(chBuy, {
-        embeds: [
-            new EmbedBuilder()
-                .setColor(COLOR_GREEN)
-                .setTitle('💳 Cómo comprar · How to buy')
-                .setDescription(
-                    `**Precios unificados para todos los juegos (Windows):**\n` +
-                    `\`1 día  · day  \` **$1.50 USD**\n` +
-                    `\`7 días · days \` **$6 USD** ⭐\n` +
-                    `\`30 días · days\` **$12 USD**\n` +
-                    `\`90 días · days\` **$25 USD**\n\n` +
-                    `**Métodos aceptados:** Yape · Plin · Binance Pay (USDT) · PayPal\n` +
-                    `**Paso a paso:** Entra al canal del juego o a ${chSupport}, abre tu ticket, envía el comprobante y recibe tu key al instante.`
-                )
-        ]
+        flags: IS_COMPONENTS_V2,
+        components: [{ type: 17, accent_color: COLOR_GREEN, components: buyItems }]
     });
 
     // C) GUIDE (ESTILO ZONA CLIENTES VIP)
-    const guideEmbeds = [];
+    const guideItems = [];
     if (GUIDE_BANNER_URL) {
-        guideEmbeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(GUIDE_BANNER_URL));
+        guideItems.push({ type: 12, items: [{ media: { url: GUIDE_BANNER_URL } }] });
+        guideItems.push({ type: 14, divider: true, spacing: 1 });
     }
-    guideEmbeds.push(
-        new EmbedBuilder()
-            .setColor(COLOR_GREEN)
-            .setTitle('📖 Zona Clientes — Guía de Inicio')
-            .setDescription(
-                `Gracias por confiar en **DrakoStore**. Aquí tienes todo para empezar en Windows, sea cual sea tu producto.\n\n` +
+    guideItems.push(
+        {
+            type: 10,
+            content:
+                `### 📖 Zona Clientes — Guía de Inicio\n` +
+                `Gracias por confiar en **DrakoStore**. Aquí tienes todo para empezar en Windows, sea cual sea tu producto.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
                 `🔑 **1 · Recibe tu key y el programa**\n` +
                 `Cuando confirmamos tu pago (o aprobamos tu prueba de 1 día gratis), el bot te envía tu **key por mensaje privado (DM)**.\n` +
                 `• Mantén abiertos los mensajes directos del servidor.\n` +
-                `• Los días cuentan desde que activas la key por primera vez.\n\n` +
+                `• Los días cuentan desde que activas la key por primera vez.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
                 `💻 **2 · Instalación en Windows (Internal y Kernel)**\n` +
                 `1. Descarga el loader oficial desde el enlace de tu ticket.\n` +
                 `2. Clic derecho → **Ejecutar como administrador**.\n` +
                 `3. Pega tu key. El loader valida la licencia, se actualiza solo y en los **Kernel** carga el driver automáticamente.\n` +
-                `4. Pon el juego en **Ventana sin bordes** y presiona **INSERT** para abrir o cerrar el menú.\n\n` +
+                `4. Pon el juego en **Ventana sin bordes** y presiona **INSERT** para abrir o cerrar el menú.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
                 `🔄 **Actualizaciones**\n` +
                 `Los programas se actualizan solos al abrirlos. Revisa siempre ${chStatus} y las novedades en ${chUpdates}.\n\n` +
                 `🛠️ **Si algo no anda**\n` +
@@ -1160,74 +1390,118 @@ async function syncServer(guild) {
                 `• Agrega la carpeta del programa como exclusión en Windows Defender.\n` +
                 `• Usa el juego en Ventana o Ventana sin bordes para ver el menú.\n` +
                 `• **Kernel:** si el driver no carga, reinicia tu PC e inténtalo de nuevo.\n\n` +
-                `🔒 **Tu key es personal**\n` +
-                `\`1 key = 1 PC\`. No la compartas. Si cambias de equipo, abre un ticket de soporte abajo.\n` +
+                `🔒 **Tu key es personal:** \`1 key = 1 PC\`. No la compartas. Si cambias de equipo, abre un ticket de soporte abajo.\n` +
                 `⭐ Cuéntanos tu experiencia en ${chVouches}.`
-            )
-            .setFooter({ text: 'DrakoStore • Customer Guide (Windows)' })
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 1,
+            components: [
+                {
+                    type: 2,
+                    style: ButtonStyle.Secondary,
+                    custom_id: 'open_support_ticket',
+                    label: 'Ticket de Soporte',
+                    emoji: { name: '🎫' }
+                }
+            ]
+        },
+        {
+            type: 10,
+            content: `-# DrakoStore • Customer Guide (Windows)`
+        }
     );
-
-    const guideRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('open_support_ticket')
-            .setLabel('Ticket de Soporte')
-            .setEmoji('🎫')
-            .setStyle(ButtonStyle.Secondary)
-    );
-    await upsertBotMessage(chGuide, { embeds: guideEmbeds, components: [guideRow] });
+    await upsertBotMessage(chGuide, {
+        flags: IS_COMPONENTS_V2,
+        components: [{ type: 17, accent_color: COLOR_GREEN, components: guideItems }]
+    });
 
     // D) RULES
+    const rulesItems = [
+        {
+            type: 10,
+            content: `### 📜 Reglas de DrakoStore`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
+                `1. **Respeto total** hacia miembros y staff.\n` +
+                `2. **Prohibido enviar enlaces**, spam o publicidad externa.\n` +
+                `3. La **prueba de 1 día gratis** es única por persona.\n` +
+                `4. Todas las compras y soporte se atienden únicamente mediante **ticket**.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content: `-# El incumplimiento puede conllevar silencio o expulsión automática.`
+        }
+    ];
     await upsertBotMessage(chRules, {
-        embeds: [
-            new EmbedBuilder()
-                .setColor(COLOR_GREEN)
-                .setTitle('📜 Reglas de DrakoStore')
-                .setDescription(
-                    `1. Respeto total hacia miembros y staff.\n` +
-                    `2. Prohibido enviar enlaces, spam o publicidad externa.\n` +
-                    `3. La prueba de 1 día gratis es única por persona.\n` +
-                    `4. Todas las compras y soporte se atienden únicamente mediante ticket.`
-                )
-        ]
+        flags: IS_COMPONENTS_V2,
+        components: [{ type: 17, accent_color: COLOR_GREEN, components: rulesItems }]
     });
 
     // E) PANEL DE SOPORTE Y PRUEBA GRATIS
-    const supportEmbeds = [];
+    const supportItems = [];
     if (BANNER_URL) {
-        supportEmbeds.push(new EmbedBuilder().setColor(COLOR_GREEN).setImage(BANNER_URL));
+        supportItems.push({ type: 12, items: [{ media: { url: BANNER_URL } }] });
+        supportItems.push({ type: 14, divider: true, spacing: 1 });
     }
-    supportEmbeds.push(
-        new EmbedBuilder()
-            .setColor(COLOR_GREEN)
-            .setTitle('🎫 Centro de Soporte, Compras y 1 Día Gratis')
-            .setDescription(
+    supportItems.push(
+        {
+            type: 10,
+            content:
+                `### 🎫 Centro de Soporte, Compras y 1 Día Gratis\n` +
+                `Selecciona el botón según lo que necesites y el bot creará tu canal privado al instante.`
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 10,
+            content:
                 `🎁 **¿Quieres 1 Día Gratis?**\n` +
                 `Presiona **Pedir 1 Día Gratis**, elige tu juego y sube tu captura siguiendo nuestras redes y dando like. Al aprobarse, **el bot te enviará la key por privado**.\n\n` +
                 `🛒 **¿Listo para comprar?**\n` +
                 `Presiona **Ticket de Compra** para pagar con Yape, Plin, Binance o PayPal.\n\n` +
                 `🛠️ **¿Necesitas ayuda técnica?**\n` +
                 `Presiona **Soporte Técnico** y un administrador te asistirá.`
-            )
+        },
+        { type: 14, divider: true, spacing: 1 },
+        {
+            type: 1,
+            components: [
+                {
+                    type: 2,
+                    style: ButtonStyle.Success,
+                    custom_id: 'open_trial_menu',
+                    label: 'Pedir 1 Día Gratis',
+                    emoji: { name: '🎁' }
+                },
+                {
+                    type: 2,
+                    style: ButtonStyle.Primary,
+                    custom_id: 'open_buy_ticket',
+                    label: 'Ticket de Compra',
+                    emoji: { name: '🛒' }
+                },
+                {
+                    type: 2,
+                    style: ButtonStyle.Secondary,
+                    custom_id: 'open_support_ticket',
+                    label: 'Soporte Técnico',
+                    emoji: { name: '🛠️' }
+                }
+            ]
+        },
+        {
+            type: 10,
+            content: `-# DrakoStore • Soporte en línea 24/7 · ${WEB_URL}`
+        }
     );
-
-    const supportRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-            .setCustomId('open_trial_menu')
-            .setLabel('Pedir 1 Día Gratis')
-            .setEmoji('🎁')
-            .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-            .setCustomId('open_buy_ticket')
-            .setLabel('Ticket de Compra')
-            .setEmoji('🛒')
-            .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-            .setCustomId('open_support_ticket')
-            .setLabel('Soporte Técnico')
-            .setEmoji('🛠️')
-            .setStyle(ButtonStyle.Secondary)
-    );
-    await upsertBotMessage(chSupport, { embeds: supportEmbeds, components: [supportRow] });
+    await upsertBotMessage(chSupport, {
+        flags: IS_COMPONENTS_V2,
+        components: [{ type: 17, accent_color: COLOR_GREEN, components: supportItems }]
+    });
 
     return stats;
 }
