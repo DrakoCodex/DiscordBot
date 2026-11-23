@@ -20,3 +20,17 @@ Bot diseñado para dejar el código público en GitHub y configurar todo desde *
 2. Pégalos en Render -> **Environment** usando las variables de `.env.example` (por ejemplo `GUIDE_BANNER_URL`, `IMG_CS2_BANNER`, `IMG_CS2_MENU`).
 3. Cuando Render reinicie, ejecuta `/update` en tu servidor y el bot actualizará todos los embeds al instante sin borrar ni duplicar canales.
 
+## Pruebas gratis y Supabase
+
+El límite de **una prueba aprobada por usuario y servidor** se guarda en Supabase; no depende de la memoria del proceso de Render. La migración `migrations/20261123030500_trial_claims.sql` crea la tabla `trial_claims`, activa RLS y añade índices únicos para impedir duplicados incluso si dos administradores aprueban al mismo tiempo.
+
+La aprobación usa la función SQL `approve_trial`, que crea la licencia y marca la solicitud como aprobada dentro de una operación atómica. Si el bot se reinicia, las solicitudes pendientes y las pruebas aprobadas permanecen registradas.
+
+Para desplegar una copia nueva:
+
+1. Crea la tabla `licenses` con las columnas que usa el bot (`id`, `key`, `game`, `duration_days`, `status`, `discord_user_id`, `hwid`, `activated_at`, `expires_at` y `created_at`).
+2. Ejecuta la migración de `migrations/20261123030500_trial_claims.sql` en el proyecto Supabase.
+3. Configura `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` únicamente en Render. Nunca publiques la clave `service_role` en GitHub, el navegador o el loader.
+4. Configura las URLs de los loaders y las imágenes indicadas en `.env.example`.
+
+Una solicitud rechazada puede volver a intentarse. Una solicitud cancelada también puede volver a crearse. Una solicitud aprobada queda bloqueada permanentemente para ese usuario dentro de ese servidor.

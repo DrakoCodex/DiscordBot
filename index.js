@@ -140,6 +140,69 @@ async function resetHwidInSupabase(key) {
     return Array.isArray(data) ? data[0] : null;
 }
 
+async function supabaseRequest(path, options = {}) {
+    if (!SUPABASE_SERVICE_ROLE_KEY) {
+        throw new Error('Falta configurar SUPABASE_SERVICE_ROLE_KEY en Render (Environment).');
+    }
+
+    const res = await fetch(`${SUPABASE_URL}${path}`, {
+        ...options,
+        headers: {
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
+        }
+    });
+
+    if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        throw new Error(`Error Supabase (${res.status}): ${errText.slice(0, 300)}`);
+    }
+
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+}
+
+async function createTrialClaim(guildId, discordUserId, gameKey) {
+    const rows = await supabaseRequest('/rest/v1/rpc/create_trial_claim', {
+        method: 'POST',
+        body: JSON.stringify({
+            p_guild_id: guildId,
+            p_discord_user_id: discordUserId,
+            p_game_key: gameKey
+        })
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
+}
+
+async function getPendingTrialByChannel(channelId) {
+    const params = new URLSearchParams({
+        select: 'id,guild_id,discord_user_id,game_key,status,ticket_channel_id,evidence_url,review_message_id',
+        ticket_channel_id: `eq.${channelId}`,
+        status: 'eq.pending',
+        limit: '1'
+    });
+    const rows = await supabaseRequest(`/rest/v1/trial_claims?${params}`);
+    return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function updateTrialClaim(claimId, values) {
+    return supabaseRequest(`/rest/v1/trial_claims?id=eq.${encodeURIComponent(claimId)}`, {
+        method: 'PATCH',
+        headers: { Prefer: 'return=representation' },
+        body: JSON.stringify({ ...values, updated_at: new Date().toISOString() })
+    });
+}
+
+async function approveTrialClaim(claimId, moderatorId) {
+    const rows = await supabaseRequest('/rest/v1/rpc/approve_trial', {
+        method: 'POST',
+        body: JSON.stringify({ p_claim_id: claimId, p_moderator_id: moderatorId })
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
+}
+
 // Jerarquia de roles en la barra derecha (de arriba hacia abajo)
 // hoist: true = seccion separada | hoist: false = aparece en "En linea" (usuarios no clientes)
 const ROLE_CONFIGS = [
@@ -316,8 +379,6 @@ const GAMES = {
 
 // Las keys se generan automaticamente en Supabase (tabla licenses)
 
-const claimedUsers = new Set();
-const activeTrialTickets = new Map();
 const spamTracker = new Map();
 
 const client = new Client({
@@ -495,37 +556,48 @@ client.on('messageCreate', async (message) => {
     const isAdmin = message.member.permissions.has(PermissionFlagsBits.ManageMessages);
 
     // A) Detectar captura dentro de un ticket de 1 Dia Gratis
-    if (activeTrialTickets.has(message.channel.id) && message.attachments.size > 0) {
+    const trialClaim = message.attachments.size > 0 ? await getPendingTrialByChannel(message.channel.id).catch(err => {
+        console.error('[TRIAL LOOKUP ERROR]', err.message);
+        return null;
+    }) : null;
+    if (trialClaim && message.attachments.size > 0) {
         const attachment = message.attachments.find(a => a.contentType?.startsWith('image/'));
         if (attachment) {
-            const ticketInfo = activeTrialTickets.get(message.channel.id);
-            const reviewCh = message.guild.channels.cache.find(c => c.name === 'staff-aprobaciones');
+            if (trialClaim.evidence_url) {
+                await message.reply('Ya recibimos una captura para este ticket. El staff está revisando la primera enviada.');
+                return;
+            }
 
+            const reviewCh = message.guild.channels.cache.find(c => c.name === 'staff-aprobaciones');
             if (reviewCh) {
-                const game = GAMES[ticketInfo.gameKey];
+                const game = GAMES[trialClaim.game_key];
                 const reviewEmbed = new EmbedBuilder()
                     .setColor(COLOR_GREEN)
                     .setTitle('Nueva captura para 1 Día Gratis')
                     .addFields(
-                        { name: 'Usuario', value: `<@${ticketInfo.userId}> (\`${message.author.tag}\`)`, inline: true },
+                        { name: 'Usuario', value: `<@${trialClaim.discord_user_id}> (\`${message.author.tag}\`)`, inline: true },
                         { name: 'Juego', value: `${game.name} (${game.type})`, inline: true },
-                        { name: 'Generación', value: 'Automática (Supabase 1 día)', inline: true }
+                        { name: 'Solicitud', value: `\`${trialClaim.id}\``, inline: false }
                     )
                     .setImage(attachment.url)
                     .setTimestamp();
 
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
-                        .setCustomId(`approve_${ticketInfo.userId}_${ticketInfo.gameKey}_${message.channel.id}`)
+                        .setCustomId(`approve_trial_${trialClaim.id}_${message.channel.id}`)
                         .setLabel('Aprobar y Enviar Key')
                         .setStyle(ButtonStyle.Success),
                     new ButtonBuilder()
-                        .setCustomId(`reject_${ticketInfo.userId}_${message.channel.id}`)
+                        .setCustomId(`reject_trial_${trialClaim.id}_${message.channel.id}`)
                         .setLabel('Rechazar')
                         .setStyle(ButtonStyle.Danger)
                 );
 
-                await reviewCh.send({ embeds: [reviewEmbed], components: [row] });
+                const reviewMessage = await reviewCh.send({ embeds: [reviewEmbed], components: [row] });
+                await updateTrialClaim(trialClaim.id, {
+                    evidence_url: attachment.url,
+                    review_message_id: reviewMessage.id
+                });
                 await message.reply('Captura recibida. El staff la está revisando; al aprobarse te enviaré tu key de 24 horas por mensaje privado.');
             }
         }
@@ -560,12 +632,18 @@ client.on('messageCreate', async (message) => {
 
 // ==================== 7. HELPERS PARA CREAR TICKETS ====================
 async function createTrialTicket(interaction, gameKey) {
-    if (claimedUsers.has(interaction.user.id)) {
+    const game = GAMES[gameKey];
+    const guild = interaction.guild;
+    const claim = await createTrialClaim(guild.id, interaction.user.id, gameKey);
+
+    if (claim.claim_status === 'approved') {
         return interaction.editReply('Ya reclamaste tu prueba gratuita de 1 día anteriormente.');
     }
 
-    const game = GAMES[gameKey];
-    const guild = interaction.guild;
+    if (!claim.was_created && claim.existing_ticket_channel_id) {
+        return interaction.editReply(`Ya tienes una solicitud pendiente: <#${claim.existing_ticket_channel_id}>`);
+    }
+
     const category = guild.channels.cache.find(
         c => c.type === ChannelType.GuildCategory && c.name.includes('COMUNIDAD')
     );
@@ -583,7 +661,7 @@ async function createTrialTicket(interaction, gameKey) {
         ]
     });
 
-    activeTrialTickets.set(ticketChannel.id, { userId: interaction.user.id, gameKey });
+    await updateTrialClaim(claim.claim_id, { ticket_channel_id: ticketChannel.id });
 
     const embed = new EmbedBuilder()
         .setColor(COLOR_GREEN)
@@ -782,10 +860,6 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- BOTON: MENU GENERAL DE PRUEBA GRATIS ---
         if (interaction.isButton() && interaction.customId === 'open_trial_menu') {
-            if (claimedUsers.has(interaction.user.id)) {
-                return interaction.reply({ content: 'Ya reclamaste tu prueba gratuita de 1 día anteriormente.', ephemeral: true });
-            }
-
             const select = new StringSelectMenuBuilder()
                 .setCustomId('select_trial_game')
                 .setPlaceholder('Elige el juego para tu prueba de 24h')
@@ -821,27 +895,27 @@ client.on('interactionCreate', async (interaction) => {
 
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
             await interaction.reply('Cerrando ticket en 5 segundos...');
-            activeTrialTickets.delete(interaction.channel.id);
+            const trialClaim = await getPendingTrialByChannel(interaction.channel.id).catch(() => null);
+            if (trialClaim) {
+                await updateTrialClaim(trialClaim.id, { status: 'cancelled' }).catch(err => {
+                    console.error('[TRIAL CLOSE ERROR]', err.message);
+                });
+            }
             setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
             return;
         }
 
-        // --- STAFF: APROBAR Y GENERAR KEY 1 DIA AUTOMATICAMENTE EN SUPABASE ---
-        if (interaction.isButton() && interaction.customId.startsWith('approve_')) {
+        // --- STAFF: APROBAR Y GENERAR KEY 1 DIA ATOMICAMENTE EN SUPABASE ---
+        if (interaction.isButton() && interaction.customId.startsWith('approve_trial_')) {
             if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
                 return interaction.reply({ content: 'Solo administradores pueden aprobar pruebas.', ephemeral: true });
             }
 
-            const [, userId, gameKey, ticketChannelId] = interaction.customId.split('_');
-            const loaderUrl = getLoaderUrl(gameKey);
+            const [, , claimId, ticketChannelId] = interaction.customId.split('_');
 
             let lic;
             try {
-                lic = await createLicenseInSupabase({
-                    gameKey,
-                    durationDays: 1,
-                    discordUserId: userId
-                });
+                lic = await approveTrialClaim(claimId, interaction.user.id);
             } catch (err) {
                 console.error('[APPROVE SUPABASE ERROR]', err);
                 return interaction.reply({
@@ -850,18 +924,24 @@ client.on('interactionCreate', async (interaction) => {
                 });
             }
 
-            claimedUsers.add(userId);
+            if (lic.result_status === 'already_approved') {
+                return interaction.update({
+                    content: 'Esta solicitud ya había sido aprobada por otro administrador.',
+                    components: []
+                });
+            }
 
-            const user = await client.users.fetch(userId);
+            const user = await client.users.fetch(lic.discord_user_id);
+            const loaderUrl = getLoaderUrl(lic.game_key);
             const dmEmbed = new EmbedBuilder()
                 .setColor(COLOR_GREEN)
                 .setTitle('🎁 Tu prueba de 1 Día Gratis fue aprobada')
                 .setDescription(
                     `Gracias por suscribirte y apoyar a **DrakoStore**.\n\n` +
-                    `**🎮 Juego:** ${GAMES[gameKey].name} (${GAMES[gameKey].type})\n` +
+                    `**🎮 Juego:** ${GAMES[lic.game_key].name} (${GAMES[lic.game_key].type})\n` +
                     `**🔑 Tu Key (24 horas):**\n\`\`\`${lic.key}\`\`\`\n` +
                     `**📥 Descargar Loader:** ${loaderUrl}\n\n` +
-                    `Renueva desde **$1.50 USD** en ${WEB_URL}/juego?id=${gameKey}`
+                    `Renueva desde **$1.50 USD** en ${WEB_URL}/juego?id=${lic.game_key}`
                 )
                 .setTimestamp();
 
@@ -874,7 +954,7 @@ client.on('interactionCreate', async (interaction) => {
 
             await interaction.update({
                 content: dmSent
-                    ? `✅ Aprobado por ${interaction.user}. Key \`${lic.key}\` generada en Supabase y enviada al privado de <@${userId}>.`
+                    ? `✅ Aprobado por ${interaction.user}. Key \`${lic.key}\` generada en Supabase y enviada al privado de <@${lic.discord_user_id}>.`
                     : `✅ Aprobado por ${interaction.user}. Key \`${lic.key}\` generada en Supabase y entregada en el ticket (el usuario tenía los DMs cerrados).`,
                 components: []
             });
@@ -882,19 +962,30 @@ client.on('interactionCreate', async (interaction) => {
             const tCh = interaction.guild.channels.cache.get(ticketChannelId);
             if (tCh) {
                 if (dmSent) {
-                    await tCh.send(`¡Aprobado <@${userId}>! Ya envié tu key de 24 horas y el link del loader por mensaje privado (DM). Este canal se cerrará en 10 segundos.`);
-                    activeTrialTickets.delete(ticketChannelId);
+                    await tCh.send(`¡Aprobado <@${lic.discord_user_id}>! Ya envié tu key de 24 horas y el link del loader por mensaje privado (DM). Este canal se cerrará en 10 segundos.`);
                     setTimeout(() => tCh.delete().catch(() => {}), 10000);
                 } else {
-                    await tCh.send({ content: `¡Aprobado <@${userId}>! Como tienes los mensajes privados desactivados, te dejo tu key aquí:`, embeds: [dmEmbed] });
-                    activeTrialTickets.delete(ticketChannelId);
+                    await tCh.send({ content: `¡Aprobado <@${lic.discord_user_id}>! Como tienes los mensajes privados desactivados, te dejo tu key aquí:`, embeds: [dmEmbed] });
                 }
             }
         }
 
         // --- STAFF: RECHAZAR ---
-        if (interaction.isButton() && interaction.customId.startsWith('reject_')) {
-            const [, userId, ticketChannelId] = interaction.customId.split('_');
+        if (interaction.isButton() && interaction.customId.startsWith('reject_trial_')) {
+            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                return interaction.reply({ content: 'Solo administradores pueden rechazar pruebas.', ephemeral: true });
+            }
+
+            const [, , claimId, ticketChannelId] = interaction.customId.split('_');
+            const claimRows = await supabaseRequest(`/rest/v1/trial_claims?id=eq.${encodeURIComponent(claimId)}&select=discord_user_id&limit=1`);
+            const userId = claimRows?.[0]?.discord_user_id;
+            if (!userId) return interaction.reply({ content: 'La solicitud ya no existe.', ephemeral: true });
+            await updateTrialClaim(claimId, {
+                status: 'rejected',
+                moderator_id: interaction.user.id,
+                rejection_reason: 'Captura rechazada por el staff',
+                rejected_at: new Date().toISOString()
+            });
             await interaction.update({ content: `❌ Rechazado por ${interaction.user}.`, components: [] });
 
             const tCh = interaction.guild.channels.cache.get(ticketChannelId);
