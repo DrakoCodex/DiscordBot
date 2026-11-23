@@ -37,9 +37,21 @@ app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`)
 // ==================== 2. CONFIGURACION (VIA ENVIRONMENT DE RENDER) ====================
 const COLOR_GREEN = 0x00E87B;
 const WEB_URL = (process.env.WEB_URL || 'https://drakostore.xyz').replace(/\/$/, '');
-const BANNER_URL = process.env.BANNER_URL || '';
-const STATUS_BANNER_URL = process.env.STATUS_BANNER_URL || BANNER_URL;
-const GUIDE_BANNER_URL = process.env.GUIDE_BANNER_URL || BANNER_URL;
+
+function validUrl(value) {
+    if (!value) return '';
+    try {
+        const url = new URL(value);
+        return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+    } catch {
+        console.warn(`[CONFIG] URL ignorada por ser invalida: ${String(value).slice(0, 100)}`);
+        return '';
+    }
+}
+
+const BANNER_URL = validUrl(process.env.BANNER_URL);
+const STATUS_BANNER_URL = validUrl(process.env.STATUS_BANNER_URL) || BANNER_URL;
+const GUIDE_BANNER_URL = validUrl(process.env.GUIDE_BANNER_URL) || BANNER_URL;
 const VOICE_CHANNEL_NAME = '🟢 Soporte en línea';
 
 // ==================== SUPABASE LICENCIAS (KEY SYSTEM AUTOMATICO) ====================
@@ -1156,8 +1168,8 @@ async function upsertBotMessage(channel, payload) {
 
 function buildGamePayload(key, g) {
     const unixNow = Math.floor(Date.now() / 1000);
-    const topBanner = process.env[g.bannerEnv] || '';
-    const menuImg = process.env[g.menuEnv] || '';
+    const topBanner = validUrl(process.env[g.bannerEnv]);
+    const menuImg = validUrl(process.env[g.menuEnv]);
 
     const containerItems = [];
 
