@@ -215,6 +215,29 @@ async function approveTrialClaim(claimId, moderatorId) {
     return Array.isArray(rows) ? rows[0] : rows;
 }
 
+async function revokeLicenseInSupabase(key) {
+    const rows = await supabaseRequest('/rest/v1/rpc/revoke_license', {
+        method: 'POST',
+        body: JSON.stringify({ p_key: key.trim() })
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
+}
+
+async function extendLicenseInSupabase(key, days) {
+    const rows = await supabaseRequest('/rest/v1/rpc/extend_license', {
+        method: 'POST',
+        body: JSON.stringify({ p_key: key.trim(), p_days: days })
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
+}
+
+function isOwner(interaction) {
+    return Boolean(
+        interaction.guild?.ownerId === interaction.user.id ||
+        interaction.member?.roles?.cache?.some(role => role.name === '👑 Owner')
+    );
+}
+
 // Jerarquia de roles en la barra derecha (de arriba hacia abajo)
 // hoist: true = seccion separada | hoist: false = aparece en "En linea" (usuarios no clientes)
 const ROLE_CONFIGS = [
@@ -495,6 +518,33 @@ const commands = [
             opt.setName('key')
                 .setDescription('Key exacta a resetear (ej: CS2-A1B2-C3D4-E5F6)')
                 .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('revoke')
+        .setDescription('Revoca una licencia y bloquea su uso inmediatamente')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(opt =>
+            opt.setName('key')
+                .setDescription('Key exacta a revocar')
+                .setRequired(true)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('adddays')
+        .setDescription('Añade días a una licencia existente')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .addStringOption(opt =>
+            opt.setName('key')
+                .setDescription('Key exacta a ampliar')
+                .setRequired(true)
+        )
+        .addIntegerOption(opt =>
+            opt.setName('dias')
+                .setDescription('Cantidad de días a añadir (1-3650)')
+                .setMinValue(1)
+                .setMaxValue(3650)
+                .setRequired(true)
         )
 ].map(c => c.toJSON());
 
@@ -513,7 +563,7 @@ client.once('clientReady', async () => {
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
-            console.log('[BOT] Slash commands registrados (/setup, /update, /genkey, /resethwid).');
+            console.log('[BOT] Slash commands registrados (/setup, /update, /genkey, /resethwid, /revoke, /adddays).');
         } catch (err) {
             console.error('[ERROR] Registrando comandos:', err);
         }
@@ -758,6 +808,9 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (interaction.commandName === 'genkey') {
+                if (!isOwner(interaction)) {
+                    return interaction.reply({ content: 'Solo el Owner puede generar licencias.', ephemeral: true });
+                }
                 await interaction.deferReply();
                 const gameKey = interaction.options.getString('juego');
                 const durationDays = interaction.options.getInteger('plan');
@@ -807,6 +860,9 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             if (interaction.commandName === 'resethwid') {
+                if (!isOwner(interaction)) {
+                    return interaction.reply({ content: 'Solo el Owner puede resetear HWIDs.', ephemeral: true });
+                }
                 await interaction.deferReply({ ephemeral: true });
                 const key = interaction.options.getString('key').trim();
                 try {
@@ -818,6 +874,40 @@ client.on('interactionCreate', async (interaction) => {
                 } catch (err) {
                     console.error('[RESETHWID ERROR]', err);
                     return interaction.editReply(`❌ Error al resetear HWID: \`${err.message}\``);
+                }
+            }
+
+            if (interaction.commandName === 'revoke') {
+                if (!isOwner(interaction)) {
+                    return interaction.reply({ content: 'Solo el Owner puede revocar licencias.', ephemeral: true });
+                }
+                await interaction.deferReply({ ephemeral: true });
+                const key = interaction.options.getString('key').trim();
+                try {
+                    const revoked = await revokeLicenseInSupabase(key);
+                    if (!revoked) return interaction.editReply('❌ No se encontró esa licencia.');
+                    return interaction.editReply(`✅ Licencia \`${revoked.license_key}\` revocada. Estado: \`${revoked.new_status}\`.`);
+                } catch (err) {
+                    console.error('[REVOKE ERROR]', err);
+                    return interaction.editReply('❌ No se pudo revocar la licencia. Revisa la key e inténtalo de nuevo.');
+                }
+            }
+
+            if (interaction.commandName === 'adddays') {
+                if (!isOwner(interaction)) {
+                    return interaction.reply({ content: 'Solo el Owner puede ampliar licencias.', ephemeral: true });
+                }
+                await interaction.deferReply({ ephemeral: true });
+                const key = interaction.options.getString('key').trim();
+                const days = interaction.options.getInteger('dias');
+                try {
+                    const extended = await extendLicenseInSupabase(key, days);
+                    if (!extended) return interaction.editReply('❌ No se encontró esa licencia.');
+                    const expiry = extended.expires_at ? ` Nueva fecha de vencimiento: <t:${Math.floor(new Date(extended.expires_at).getTime() / 1000)}:F>.` : '';
+                    return interaction.editReply(`✅ Se añadieron **${extended.added_days} días** a \`${extended.license_key}\`. Duración total: **${extended.total_duration_days} días**.${expiry}`);
+                } catch (err) {
+                    console.error('[ADDDAYS ERROR]', err);
+                    return interaction.editReply('❌ No se pudo ampliar la licencia. Comprueba que exista y no esté revocada.');
                 }
             }
         }
@@ -906,6 +996,9 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
+            if (!isOwner(interaction)) {
+                return interaction.reply({ content: 'Solo el Owner puede cerrar tickets.', ephemeral: true });
+            }
             await interaction.reply('Cerrando ticket en 5 segundos...');
             const trialClaim = await getPendingTrialByChannel(interaction.channel.id).catch(() => null);
             if (trialClaim) {
@@ -919,8 +1012,8 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- STAFF: APROBAR Y GENERAR KEY 1 DIA ATOMICAMENTE EN SUPABASE ---
         if (interaction.isButton() && interaction.customId.startsWith('approve_trial_')) {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                return interaction.reply({ content: 'Solo administradores pueden aprobar pruebas.', ephemeral: true });
+            if (!isOwner(interaction)) {
+                return interaction.reply({ content: 'Solo el Owner puede aprobar pruebas.', ephemeral: true });
             }
 
             const [, , claimId, ticketChannelId] = interaction.customId.split('_');
@@ -984,8 +1077,8 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- STAFF: RECHAZAR ---
         if (interaction.isButton() && interaction.customId.startsWith('reject_trial_')) {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                return interaction.reply({ content: 'Solo administradores pueden rechazar pruebas.', ephemeral: true });
+            if (!isOwner(interaction)) {
+                return interaction.reply({ content: 'Solo el Owner puede rechazar pruebas.', ephemeral: true });
             }
 
             const [, , claimId, ticketChannelId] = interaction.customId.split('_');

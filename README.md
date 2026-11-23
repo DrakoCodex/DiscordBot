@@ -34,3 +34,18 @@ Para desplegar una copia nueva:
 4. Configura las URLs de los loaders y las imágenes indicadas en `.env.example`.
 
 Una solicitud rechazada puede volver a intentarse. Una solicitud cancelada también puede volver a crearse. Una solicitud aprobada queda bloqueada permanentemente para ese usuario dentro de ese servidor.
+
+## Permisos de Owner y gestión de licencias
+
+Las acciones sensibles requieren el rol exacto `👑 Owner` o ser el dueño del servidor. Tener permisos de Administrador no es suficiente. Esta protección se valida dentro del código antes de ejecutar la operación.
+
+Solo Owner puede:
+
+- Ejecutar `/genkey`.
+- Ejecutar `/resethwid`.
+- Aprobar o rechazar pruebas gratuitas.
+- Cerrar tickets con el botón `Cerrar Ticket`.
+- Ejecutar `/revoke key:<key>` para bloquear una licencia.
+- Ejecutar `/adddays key:<key> dias:<cantidad>` para ampliar una licencia entre 1 y 3650 días.
+
+`/revoke` cambia el estado de la licencia a `banned`. `/adddays` aumenta `duration_days` y, si la licencia ya estaba activada, también extiende `expires_at`. Una licencia revocada no se puede ampliar con ese comando.
