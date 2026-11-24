@@ -1,6 +1,7 @@
 require('dotenv').config();
 const crypto = require('crypto');
 const express = require('express');
+const path = require('path');
 const {
     Client,
     GatewayIntentBits,
@@ -27,6 +28,7 @@ const {
 // ==================== 1. KEEP-ALIVE PARA RENDER + UPTIMEROBOT ====================
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.get('/', (req, res) => {
     res.status(200).send('DrakoStore Bot v3.4 Online 24/7');
@@ -49,10 +51,15 @@ function validUrl(value) {
     }
 }
 
-const BANNER_URL = validUrl(process.env.BANNER_URL);
-const STATUS_BANNER_URL = validUrl(process.env.STATUS_BANNER_URL) || BANNER_URL;
-const GUIDE_BANNER_URL = validUrl(process.env.GUIDE_BANNER_URL) || BANNER_URL;
+const ASSET_BASE_URL = (process.env.PUBLIC_ASSET_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+const bundledAssetUrl = name => ASSET_BASE_URL ? `${ASSET_BASE_URL}/assets/${name}` : '';
+const BANNER_URL = validUrl(process.env.BANNER_URL) || bundledAssetUrl('welcome.jpg');
+const STATUS_BANNER_URL = validUrl(process.env.STATUS_BANNER_URL) || bundledAssetUrl('status.jpg') || BANNER_URL;
+const GUIDE_BANNER_URL = validUrl(process.env.GUIDE_BANNER_URL) || bundledAssetUrl('guide.jpg');
+const HOW_TO_BUY_BANNER_URL = validUrl(process.env.HOW_TO_BUY_BANNER_URL) || bundledAssetUrl('how-to-buy.jpg');
+const RULES_BANNER_URL = validUrl(process.env.RULES_BANNER_URL) || bundledAssetUrl('rules.jpg');
 const VOICE_CHANNEL_NAME = '🟢 Soporte en línea';
+const STAFF_CATEGORY_NAME = '🔒 OWNER · STAFF';
 
 // ==================== SUPABASE LICENCIAS (KEY SYSTEM AUTOMATICO) ====================
 const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://soykyouvyromdkqvkewp.supabase.co').replace(/\/$/, '');
@@ -238,6 +245,20 @@ function isOwner(interaction) {
     );
 }
 
+function isStaff(interaction) {
+    return Boolean(interaction.member?.roles?.cache?.some(role =>
+        ['🛡️ Staff', 'Staff'].includes(role.name)
+    ));
+}
+
+function isOwnerOrStaff(interaction) {
+    return isOwner(interaction) || isStaff(interaction);
+}
+
+function isStaffOpsChannel(interaction) {
+    return interaction.channel?.parent?.name === STAFF_CATEGORY_NAME;
+}
+
 // Jerarquia de roles en la barra derecha (de arriba hacia abajo)
 // hoist: true = seccion separada | hoist: false = aparece en "En linea" (usuarios no clientes)
 const ROLE_CONFIGS = [
@@ -245,10 +266,18 @@ const ROLE_CONFIGS = [
         key: 'owner',
         name: '👑 Owner',
         legacyNames: ['Owner'],
-        color: 0xF5B700,
+        color: 0xFF0000,
         hoist: true,
         mentionable: false,
         permissions: [PermissionFlagsBits.Administrator]
+    },
+    {
+        key: 'staff',
+        name: '🛡️ Staff',
+        legacyNames: ['Staff'],
+        color: 0x9B59B6,
+        hoist: true,
+        mentionable: false
     },
     {
         key: 'partner',
@@ -262,7 +291,7 @@ const ROLE_CONFIGS = [
         key: 'bots',
         name: '🤖 Bots',
         legacyNames: ['Bots', 'Bot'],
-        color: 0x5865F2,
+        color: 0x3498DB,
         hoist: true,
         mentionable: false
     },
@@ -270,7 +299,7 @@ const ROLE_CONFIGS = [
         key: 'clientes',
         name: '💎 Clientes',
         legacyNames: ['Clientes', 'Cliente VIP', 'Cliente'],
-        color: COLOR_GREEN,
+        color: 0x00FFFF,
         hoist: true,
         mentionable: false
     },
@@ -278,7 +307,7 @@ const ROLE_CONFIGS = [
         key: 'miembro',
         name: 'Miembro',
         legacyNames: [],
-        color: 0x8EA398,
+        color: 0x111111,
         hoist: false,
         mentionable: false
     }
@@ -474,13 +503,11 @@ const commands = [
 
     new SlashCommandBuilder()
         .setName('update')
-        .setDescription('Actualiza los embeds, imagenes y permisos de todos los canales ya creados')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+        .setDescription('Actualiza los embeds, imagenes y permisos de todos los canales ya creados'),
 
     new SlashCommandBuilder()
         .setName('genkey')
         .setDescription('Genera una key en Supabase segun juego y plan y la entrega con el link del loader')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(opt =>
             opt.setName('juego')
                 .setDescription('Juego para el que sirve la key')
@@ -570,6 +597,12 @@ client.once('clientReady', async () => {
 
         const guild = client.guilds.cache.get(process.env.GUILD_ID);
         if (guild) {
+            try {
+                const summary = await syncServer(guild);
+                console.log(`[SYNC] Inicio aplicado: ${summary.created} canales nuevos, ${summary.updated} canales verificados, ${summary.rolesCreated} roles nuevos.`);
+            } catch (err) {
+                console.error('[SYNC ERROR] Sincronización al inicio falló:', err);
+            }
             connectToSupportVoice(guild);
             setInterval(() => connectToSupportVoice(guild), 120000);
         }
@@ -794,6 +827,15 @@ client.on('interactionCreate', async (interaction) => {
         // --- SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
             if (interaction.commandName === 'setup' || interaction.commandName === 'update') {
+                if (interaction.commandName === 'setup' && !isOwner(interaction)) {
+                    return interaction.reply({ content: 'Solo el Owner puede ejecutar /setup.', ephemeral: true });
+                }
+                if (interaction.commandName === 'update' && !isOwnerOrStaff(interaction)) {
+                    return interaction.reply({ content: 'Solo Owner o Staff pueden ejecutar /update.', ephemeral: true });
+                }
+                if (!isStaffOpsChannel(interaction)) {
+                    return interaction.reply({ content: `Usa este comando dentro de la categoría privada ${STAFF_CATEGORY_NAME}.`, ephemeral: true });
+                }
                 await interaction.deferReply({ ephemeral: true });
                 const summary = await syncServer(interaction.guild);
                 connectToSupportVoice(interaction.guild);
@@ -801,17 +843,20 @@ client.on('interactionCreate', async (interaction) => {
                     `✅ **Sincronización completada (${interaction.commandName === 'setup' ? 'Setup' : 'Update'})**\n` +
                     `• Roles creados: **${summary.rolesCreated}** | verificados/actualizados: **${summary.rolesUpdated}**\n` +
                     `• Canales creados: **${summary.created}** | verificados/actualizados: **${summary.updated}**\n` +
-                    `• Jerarquía de roles: **👑 Owner → 🤝 Partner → 🤖 Bots → 💎 Clientes → En línea (no clientes)**\n` +
+                    `• Jerarquía de roles: **👑 Owner → 🛡️ Staff → 🤝 Partner → 🤖 Bots → 💎 Clientes → Miembro**\n` +
                     `• Paneles e imágenes actualizados sin duplicados.\n` +
                     `• Bot conectado a **${VOICE_CHANNEL_NAME}**.`
                 );
             }
 
             if (interaction.commandName === 'genkey') {
-                if (!isOwner(interaction)) {
-                    return interaction.reply({ content: 'Solo el Owner puede generar licencias.', ephemeral: true });
+                if (!isOwnerOrStaff(interaction)) {
+                    return interaction.reply({ content: 'Solo Owner o Staff pueden generar licencias.', ephemeral: true });
                 }
-                await interaction.deferReply();
+                if (!isStaffOpsChannel(interaction)) {
+                    return interaction.reply({ content: `Usa /genkey dentro de la categoría privada ${STAFF_CATEGORY_NAME}.`, ephemeral: true });
+                }
+                await interaction.deferReply({ ephemeral: true });
                 const gameKey = interaction.options.getString('juego');
                 const durationDays = interaction.options.getInteger('plan');
                 const targetUser = interaction.options.getUser('cliente');
@@ -996,8 +1041,8 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         if (interaction.isButton() && interaction.customId === 'close_ticket') {
-            if (!isOwner(interaction)) {
-                return interaction.reply({ content: 'Solo el Owner puede cerrar tickets.', ephemeral: true });
+            if (!isOwnerOrStaff(interaction)) {
+                return interaction.reply({ content: 'Solo Owner o Staff pueden cerrar tickets.', ephemeral: true });
             }
             await interaction.reply('Cerrando ticket en 5 segundos...');
             const trialClaim = await getPendingTrialByChannel(interaction.channel.id).catch(() => null);
@@ -1012,8 +1057,8 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- STAFF: APROBAR Y GENERAR KEY 1 DIA ATOMICAMENTE EN SUPABASE ---
         if (interaction.isButton() && interaction.customId.startsWith('approve_trial_')) {
-            if (!isOwner(interaction)) {
-                return interaction.reply({ content: 'Solo el Owner puede aprobar pruebas.', ephemeral: true });
+            if (!isOwnerOrStaff(interaction)) {
+                return interaction.reply({ content: 'Solo Owner o Staff pueden aprobar pruebas.', ephemeral: true });
             }
 
             const [, , claimId, ticketChannelId] = interaction.customId.split('_');
@@ -1077,8 +1122,8 @@ client.on('interactionCreate', async (interaction) => {
 
         // --- STAFF: RECHAZAR ---
         if (interaction.isButton() && interaction.customId.startsWith('reject_trial_')) {
-            if (!isOwner(interaction)) {
-                return interaction.reply({ content: 'Solo el Owner puede rechazar pruebas.', ephemeral: true });
+            if (!isOwnerOrStaff(interaction)) {
+                return interaction.reply({ content: 'Solo Owner o Staff pueden rechazar pruebas.', ephemeral: true });
             }
 
             const [, , claimId, ticketChannelId] = interaction.customId.split('_');
@@ -1153,7 +1198,7 @@ async function syncRoles(guild, stats) {
         roles[cfg.key] = await ensureRole(guild, cfg, stats);
     }
 
-    // Reordenar jerarquia de arriba hacia abajo: Owner > Partner > Bots > Clientes > Miembro
+    // Reordenar jerarquia de arriba hacia abajo: Owner > Staff > Partner > Bots > Clientes > Miembro
     await guild.roles.fetch();
     const botMaxPos = guild.members.me?.roles.highest?.position ?? 1;
     const orderedEditable = ROLE_CONFIGS
@@ -1168,7 +1213,7 @@ async function syncRoles(guild, stats) {
         await guild.roles.setPositions(positionUpdates).catch(() => {});
     }
 
-    // Auto-asignar roles: Owner al dueno, Bots a bots, Miembro (hoist: false) a humanos
+    // Auto-asignar roles: Owner al dueno, Bots a bots, Miembro (no cliente) a humanos
     await guild.members.fetch().catch(() => {});
 
     if (roles.owner && roles.owner.editable) {
@@ -1193,14 +1238,18 @@ async function syncRoles(guild, stats) {
     return roles;
 }
 
-async function ensureCategory(guild, name, overwrites = null, stats) {
+async function ensureCategory(guild, name, overwrites = null, stats, legacyNames = []) {
     let cat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && c.name === name);
+    if (!cat && legacyNames.length) {
+        cat = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && legacyNames.includes(c.name));
+    }
     if (!cat) {
         const opts = { name, type: ChannelType.GuildCategory };
         if (overwrites) opts.permissionOverwrites = overwrites;
         cat = await guild.channels.create(opts);
         stats.created++;
     } else {
+        if (cat.name !== name) await cat.setName(name).catch(() => {});
         if (overwrites) await cat.permissionOverwrites.set(overwrites).catch(() => {});
         stats.updated++;
     }
@@ -1235,6 +1284,37 @@ async function ensureChannel(guild, name, type, parentId, { readOnly = false, to
     }
 
     return ch;
+}
+
+async function disableThreadCreation(guild) {
+    await guild.channels.fetch();
+    const supportedTypes = [
+        ChannelType.GuildCategory,
+        ChannelType.GuildText,
+        ChannelType.GuildAnnouncement,
+        ChannelType.GuildForum
+    ];
+    const threadPermissions = [
+        PermissionFlagsBits.CreatePublicThreads,
+        PermissionFlagsBits.CreatePrivateThreads
+    ].filter(Boolean);
+
+    for (const channel of guild.channels.cache.values()) {
+        if (!supportedTypes.includes(channel.type)) continue;
+        await channel.permissionOverwrites.edit(guild.id, {
+            CreatePublicThreads: false,
+            CreatePrivateThreads: false
+        }).catch(err => console.warn(`[THREADS] No se pudieron bloquear hilos en ${channel.name}: ${err.message}`));
+
+        for (const overwrite of channel.permissionOverwrites.cache.values()) {
+            if (overwrite.id === guild.id) continue;
+            if (!threadPermissions.some(permission => overwrite.allow.has(permission))) continue;
+            await channel.permissionOverwrites.edit(overwrite.id, {
+                CreatePublicThreads: false,
+                CreatePrivateThreads: false
+            }).catch(err => console.warn(`[THREADS] No se pudo quitar permiso de hilos en ${channel.name}: ${err.message}`));
+        }
+    }
 }
 
 const IS_COMPONENTS_V2 = 1 << 15; // 32768 - Discord Components V2
@@ -1383,7 +1463,7 @@ async function syncServer(guild) {
     await guild.channels.fetch();
     const stats = { created: 0, updated: 0, rolesCreated: 0, rolesUpdated: 0 };
 
-    await syncRoles(guild, stats);
+    const roles = await syncRoles(guild, stats);
 
     // 1) CANAL DE VOZ 24/7 BLOQUEADO
     await ensureChannel(
@@ -1435,14 +1515,36 @@ async function syncServer(guild) {
     const chSupport = await ensureChannel(guild, '🎫｜support', ChannelType.GuildText, catComm.id, { readOnly: true, topic: 'Abre ticket de compra, soporte o reclama 1 día gratis' }, stats);
     await ensureChannel(guild, '💬｜general', ChannelType.GuildText, catComm.id, { topic: 'Chat general de la comunidad DrakoStore' }, stats);
 
-    // 6) STAFF PRIVADO
+    // 6) OWNER · STAFF PRIVADO
+    const staffChannelPermissions = [
+        PermissionFlagsBits.ViewChannel,
+        PermissionFlagsBits.SendMessages,
+        PermissionFlagsBits.ReadMessageHistory,
+        PermissionFlagsBits.AttachFiles,
+        PermissionFlagsBits.EmbedLinks,
+        PermissionFlagsBits.ManageMessages,
+        PermissionFlagsBits.ManageChannels
+    ];
+    const staffOverwrites = [
+        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+        ...[roles.owner, roles.staff].filter(Boolean).map(role => ({
+            id: role.id,
+            allow: staffChannelPermissions
+        })),
+        { id: client.user.id, allow: staffChannelPermissions }
+    ];
     const catStaff = await ensureCategory(
         guild,
-        '🔒 STAFF',
-        [{ id: guild.id, deny: [PermissionFlagsBits.ViewChannel] }],
-        stats
+        STAFF_CATEGORY_NAME,
+        staffOverwrites,
+        stats,
+        ['🔒 STAFF']
     );
     await ensureChannel(guild, 'staff-aprobaciones', ChannelType.GuildText, catStaff.id, { topic: 'Panel privado para aprobar capturas de 1 día gratis' }, stats);
+    await ensureChannel(guild, '🤖｜bot-commands', ChannelType.GuildText, catStaff.id, { topic: 'Comandos privados del bot: /update y /genkey' }, stats);
+    await ensureChannel(guild, '🚀｜staff-updates', ChannelType.GuildText, catStaff.id, { topic: 'Registro interno de cambios y despliegues' }, stats);
+
+    await disableThreadCreation(guild);
 
     // ==================== ACTUALIZAR PANELES PRINCIPALES (COMPONENTS V2 UNIFICADO) ====================
 
@@ -1489,7 +1591,12 @@ async function syncServer(guild) {
     });
 
     // B) HOW TO BUY
-    const buyItems = [
+    const buyItems = [];
+    if (HOW_TO_BUY_BANNER_URL) {
+        buyItems.push({ type: 12, items: [{ media: { url: HOW_TO_BUY_BANNER_URL } }] });
+        buyItems.push({ type: 14, divider: true, spacing: 1 });
+    }
+    buyItems.push(
         {
             type: 10,
             content:
@@ -1537,7 +1644,7 @@ async function syncServer(guild) {
             type: 10,
             content: `-# ⚡ Entrega inmediata · 1 key = 1 PC · ${WEB_URL}`
         }
-    ];
+    );
     await upsertBotMessage(chBuy, {
         flags: IS_COMPONENTS_V2,
         components: [{ type: 17, accent_color: COLOR_GREEN, components: buyItems }]
@@ -1613,7 +1720,12 @@ async function syncServer(guild) {
     });
 
     // D) RULES
-    const rulesItems = [
+    const rulesItems = [];
+    if (RULES_BANNER_URL) {
+        rulesItems.push({ type: 12, items: [{ media: { url: RULES_BANNER_URL } }] });
+        rulesItems.push({ type: 14, divider: true, spacing: 1 });
+    }
+    rulesItems.push(
         {
             type: 10,
             content: `### 📜 Reglas de DrakoStore`
@@ -1632,7 +1744,7 @@ async function syncServer(guild) {
             type: 10,
             content: `-# El incumplimiento puede conllevar silencio o expulsión automática.`
         }
-    ];
+    );
     await upsertBotMessage(chRules, {
         flags: IS_COMPONENTS_V2,
         components: [{ type: 17, accent_color: COLOR_GREEN, components: rulesItems }]
