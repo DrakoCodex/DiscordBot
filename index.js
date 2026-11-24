@@ -31,7 +31,7 @@ const PORT = process.env.PORT || 3000;
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.get('/', (req, res) => {
-    res.status(200).send('DrakoStore Bot v3.5.0 Online 24/7');
+    res.status(200).send('DrakoStore Bot v3.6.0 Online 24/7');
 });
 
 app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`));
@@ -362,11 +362,11 @@ const GAMES = {
     'free-fire': {
         name: 'Free Fire',
         slug: 'free-fire',
-        type: 'Internal',
+        type: 'External',
         channelName: '🟢｜free-fire',
-        topic: 'DrakoStore · Free Fire Internal (Windows / Emulador) · Precios y compra',
+        topic: 'DrakoStore · Free Fire External (Windows / Emulador) · Precios y compra',
         tagline: 'DEDICADO A JUGADORES DE EMULADOR EN WINDOWS',
-        desc: 'Suite Internal optimizada para **MSI App Player y BlueStacks 5** en Windows. Precisión suave, cero caídas de FPS y modo StreamProof.',
+        desc: 'Suite External optimizada para **MSI App Player y BlueStacks 5** en Windows. Precisión suave, cero caídas de FPS y modo StreamProof.',
         bannerEnv: 'IMG_FF_BANNER',
         menuEnv: 'IMG_FF_MENU',
         shortFeatures: [
@@ -387,11 +387,11 @@ const GAMES = {
     'cs2': {
         name: 'Counter-Strike 2',
         slug: 'cs2',
-        type: 'Internal',
+        type: 'External',
         channelName: '🟢｜cs2',
-        topic: 'DrakoStore · Counter-Strike 2 Internal (Windows) · Precios y compra',
-        tagline: 'PRECISIÓN INTERNAL PARA PREMIER Y MATCHMAKING',
-        desc: 'Arquitectura **Internal** diseñada para rendimiento fluido en Windows 10/11. Aimbot Legit, RCS automático y visuales nítidos sin pérdida de FPS.',
+        topic: 'DrakoStore · Counter-Strike 2 External (Windows) · Precios y compra',
+        tagline: 'PRECISIÓN EXTERNAL PARA PREMIER Y MATCHMAKING',
+        desc: 'Arquitectura **External** diseñada para rendimiento fluido en Windows 10/11. Aimbot Legit, RCS automático y visuales nítidos sin pérdida de FPS.',
         bannerEnv: 'IMG_CS2_BANNER',
         menuEnv: 'IMG_CS2_MENU',
         shortFeatures: [
@@ -400,7 +400,7 @@ const GAMES = {
             '👁️ **ESP & Radar** — Cajas, esqueleto, vida, chaleco, armas, temporizador C4 y lista de espectadores.'
         ],
         fullFeatures: [
-            '• Aimbot Internal por arma con suavizado natural',
+            '• Aimbot External por arma con suavizado natural',
             '• RCS (Recoil Control System) en ejes X e Y',
             '• Triggerbot con delay configurable',
             '• Box ESP, Skeleton, barra de salud y armadura',
@@ -412,21 +412,21 @@ const GAMES = {
     'roblox': {
         name: 'Roblox',
         slug: 'roblox',
-        type: 'Internal',
+        type: 'External',
         channelName: '🟢｜roblox',
-        topic: 'DrakoStore · Roblox Internal (Windows) · Precios y compra',
-        tagline: 'EJECUTOR INTERNAL LUAU DE ALTA ESTABILIDAD',
-        desc: 'Motor **Internal** para Windows con alta compatibilidad UNC, sin key systems molestos ni anuncios, y con Script Hub listo para usar.',
+        topic: 'DrakoStore · Roblox External (Windows) · Precios y compra',
+        tagline: 'MOTOR EXTERNAL LUAU DE ALTA ESTABILIDAD',
+        desc: 'Motor **External** para Windows con alta compatibilidad UNC, sin key systems molestos ni anuncios, y con Script Hub listo para usar.',
         bannerEnv: 'IMG_ROBLOX_BANNER',
         menuEnv: 'IMG_ROBLOX_MENU',
         shortFeatures: [
-            '⚡ **Motor Internal** — Alta compatibilidad UNC, inyección instantánea y soporte multi-pestaña.',
+            '⚡ **Motor External** — Alta compatibilidad UNC, ejecución instantánea y soporte multi-pestaña.',
             '👁️ **Hub Integrado** — ESP universal, Aimbot para shooters, Speed, Fly y Noclip.',
             '🛡️ **Sin Key System** — Acceso directo con tu licencia, tecla de pánico y desbloqueador de FPS.'
         ],
         fullFeatures: [
             '• Alta compatibilidad UNC para scripts complejos en Luau',
-            '• Inyección Internal rápida con bajo uso de CPU',
+            '• Ejecución External rápida con bajo uso de CPU',
             '• Editor con pestañas múltiples y Auto-Execute',
             '• Script Hub verificado para los juegos más populares',
             '• ESP universal, Aimbot y cámara libre',
@@ -590,9 +590,9 @@ const commands = [
                 .setDescription('Juego para el que sirve la key')
                 .setRequired(true)
                 .addChoices(
-                    { name: 'Free Fire (Internal)', value: 'free-fire' },
-                    { name: 'Counter-Strike 2 (Internal)', value: 'cs2' },
-                    { name: 'Roblox (Internal)', value: 'roblox' },
+                    { name: 'Free Fire (External)', value: 'free-fire' },
+                    { name: 'Counter-Strike 2 (External)', value: 'cs2' },
+                    { name: 'Roblox (External)', value: 'roblox' },
                     { name: 'ROB RUN (Kernel)', value: 'robrun' },
                     { name: 'Minecraft Java (Kernel)', value: 'minecraft' }
                 )
@@ -676,7 +676,7 @@ client.once('clientReady', async () => {
         if (guild) {
             try {
                 const summary = await syncServer(guild);
-                console.log(`[SYNC] Inicio aplicado: ${summary.created} canales nuevos, ${summary.updated} canales verificados, ${summary.rolesCreated} roles nuevos.`);
+                console.log(`[SYNC] Inicio aplicado: ${summary.created} canales nuevos, ${summary.updated} canales verificados, ${summary.duplicatesRemoved || 0} duplicados de tienda eliminados, ${summary.rolesCreated} roles nuevos.`);
             } catch (err) {
                 console.error('[SYNC ERROR] Sincronización al inicio falló:', err);
             }
@@ -708,7 +708,7 @@ client.on('guildMemberAdd', async (member) => {
         .setColor(COLOR_GREEN)
         .setTitle(`Bienvenido a DrakoStore, ${member.user.username}`)
         .setDescription(
-            `Herramientas **Kernel e Internal para Windows** desde **$1.50 USD**.\n\n` +
+            `Herramientas **External y Kernel para Windows** desde **$1.50 USD**.\n\n` +
             `• Revisa el estado en vivo y los juegos disponibles.\n` +
             `• Reclama **1 día gratis** en soporte subiendo tu captura.\n` +
             `• Web oficial: ${WEB_URL}`
@@ -939,7 +939,7 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.editReply(
                     `✅ **Sincronización completada (${interaction.commandName === 'setup' ? 'Setup' : 'Update'})**\n` +
                     `• Roles creados: **${summary.rolesCreated}** | verificados/actualizados: **${summary.rolesUpdated}**\n` +
-                    `• Canales creados: **${summary.created}** | verificados/actualizados: **${summary.updated}**\n` +
+                    `• Canales creados: **${summary.created}** | verificados/actualizados: **${summary.updated}** | duplicados eliminados: **${summary.duplicatesRemoved || 0}**\n` +
                     `• Jerarquía de roles: **👑 Owner → 🛡️ Staff → 🤝 Partner → 🤖 Bots → 💎 Clientes → Miembro**\n` +
                     `• Paneles e imágenes actualizados sin duplicados.\n` +
                     `• Bot conectado a **${VOICE_CHANNEL_NAME}**.`
@@ -960,6 +960,7 @@ client.on('interactionCreate', async (interaction) => {
                 const note = interaction.options.getString('nota') || '';
                 try {
                     const statuses = await loadGameStatuses(interaction.guildId);
+                    const previousStatus = statuses[gameKey]?.status || 'online';
                     const savedStatus = await saveGameStatus({
                         guildId: interaction.guildId,
                         gameKey,
@@ -974,6 +975,24 @@ client.on('interactionCreate', async (interaction) => {
                         updated_at: new Date().toISOString()
                     };
                     await refreshStatusPanels(interaction.guild, statuses);
+                    if (status === 'maintenance' && previousStatus !== 'maintenance') {
+                        const announcements = interaction.guild.channels.cache.find(ch =>
+                            ch.type === ChannelType.GuildText && ch.name === '📢｜announcements'
+                        );
+                        if (announcements) {
+                            try {
+                                await announcements.send({
+                                    content: `@everyone ⚠️ **${GAMES[gameKey].name} está en mantenimiento hasta nuevo aviso.**`,
+                                    allowedMentions: { parse: ['everyone'] }
+                                });
+                                console.log(`[ANNOUNCEMENT] Mantenimiento anunciado: ${GAMES[gameKey].name}`);
+                            } catch (err) {
+                                console.error(`[ANNOUNCEMENT ERROR] No se pudo anunciar mantenimiento de ${GAMES[gameKey].name}:`, err.message);
+                            }
+                        } else {
+                            console.warn('[ANNOUNCEMENT] No se encontró 📢｜announcements.');
+                        }
+                    }
                     const statusInfo = GAME_STATUSES[status];
                     return interaction.editReply(
                         `${statusInfo.emoji} **${GAMES[gameKey].name}: ${statusInfo.label}.** ` +
@@ -1445,6 +1464,49 @@ async function ensureChannel(guild, name, type, parentId, { readOnly = false, to
     return ch;
 }
 
+function gameChannelToken(value) {
+    return String(value || '').normalize('NFKD').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+async function ensureShopGameChannel(guild, categoryId, game, desiredName, stats) {
+    const token = gameChannelToken(game.slug);
+    const matches = [...guild.channels.cache.values()].filter(ch =>
+        ch.type === ChannelType.GuildText &&
+        ch.parentId === categoryId &&
+        gameChannelToken(ch.name) === token
+    );
+    const channel = matches.find(ch => ch.name === desiredName) || matches[0] || null;
+
+    for (const duplicate of matches) {
+        if (duplicate.id === channel?.id) continue;
+        try {
+            await duplicate.delete(`Remove duplicate ${game.name} channel in shop`);
+            stats.duplicatesRemoved = (stats.duplicatesRemoved || 0) + 1;
+            console.log(`[SHOP DEDUPE] Eliminado canal duplicado de ${game.name}: ${duplicate.name} (${duplicate.id})`);
+        } catch (err) {
+            console.warn(`[SHOP DEDUPE] No se pudo eliminar ${duplicate.name} (${duplicate.id}): ${err.message}`);
+        }
+    }
+
+    let result = channel;
+    if (!result) {
+        result = await guild.channels.create({
+            name: desiredName,
+            type: ChannelType.GuildText,
+            parent: categoryId,
+            topic: game.topic
+        });
+        stats.created++;
+    } else {
+        if (result.name !== desiredName) await result.setName(desiredName);
+        if (result.parentId !== categoryId) await result.setParent(categoryId, { lockPermissions: false });
+        if (result.topic !== game.topic) await result.setTopic(game.topic);
+        stats.updated++;
+    }
+    await result.permissionOverwrites.edit(guild.id, { SendMessages: false }).catch(() => {});
+    return result;
+}
+
 async function disableThreadCreation(guild) {
     await guild.channels.fetch();
     const supportedTypes = [
@@ -1639,7 +1701,7 @@ function buildStatusOverviewPayload(gameChannels, gameStatuses) {
             ? GAME_STATUSES.maintenance
             : GAME_STATUSES.online;
     const unixNow = Math.floor(Date.now() / 1000);
-    const pcRows = entries.filter(entry => entry.game.type === 'Internal').map(entry =>
+    const pcRows = entries.filter(entry => entry.game.type === 'External').map(entry =>
         `${entry.appearance.emoji} **${entry.game.name}** — ${entry.channel || entry.game.channelName}` +
         (entry.note ? ` · ${entry.note}` : '')
     );
@@ -1659,7 +1721,7 @@ function buildStatusOverviewPayload(gameChannels, gameStatuses) {
                 ] : []),
                 { type: 10, content: `### ${overall.emoji} DrakoStore · Estado del servicio\n${overall.label}\n-# 🔄 Revisado <t:${unixNow}:R>` },
                 { type: 14, divider: true, spacing: 1 },
-                { type: 10, content: `**💉 PC · Internals (Windows)**\n${pcRows.join('\n')}` },
+                { type: 10, content: `**🖥️ PC · Externals (Windows)**\n${pcRows.join('\n')}` },
                 { type: 14, divider: true, spacing: 1 },
                 { type: 10, content: `**⚡ PC · Kernel (Windows)**\n${kernelRows.join('\n')}` },
                 { type: 14, divider: true, spacing: 1 },
@@ -1696,7 +1758,7 @@ async function refreshStatusPanels(guild, gameStatuses) {
 
 async function syncServer(guild) {
     await guild.channels.fetch();
-    const stats = { created: 0, updated: 0, rolesCreated: 0, rolesUpdated: 0 };
+    const stats = { created: 0, updated: 0, rolesCreated: 0, rolesUpdated: 0, duplicatesRemoved: 0 };
 
     const gameStatuses = await loadGameStatuses(guild.id);
     const roles = await syncRoles(guild, stats);
@@ -1739,7 +1801,7 @@ async function syncServer(guild) {
         const state = gameStatuses[key] || { status: 'online', note: '' };
         const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
         const channelName = setGameChannelStatusName(g.channelName, appearance.emoji);
-        const ch = await ensureChannel(guild, channelName, ChannelType.GuildText, catShop.id, { readOnly: true, topic: g.topic }, stats);
+        const ch = await ensureShopGameChannel(guild, catShop.id, g, channelName, stats);
         gameChannels[key] = ch;
         await upsertBotMessage(ch, buildGamePayload(key, g, state));
     }
@@ -1876,7 +1938,7 @@ async function syncServer(guild) {
         {
             type: 10,
             content:
-                `💻 **2 · Instalación en Windows (Internal y Kernel)**\n` +
+                `💻 **2 · Instalación en Windows (External y Kernel)**\n` +
                 `1. Descarga el loader oficial desde el enlace de tu ticket.\n` +
                 `2. Clic derecho → **Ejecutar como administrador**.\n` +
                 `3. Pega tu key. El loader valida la licencia, se actualiza solo y en los **Kernel** carga el driver automáticamente.\n` +

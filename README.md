@@ -1,4 +1,4 @@
-# DrakoStore Bot v3.5.0
+# DrakoStore Bot v3.6.0
 
 Bot diseñado para dejar el código público en GitHub y configurar todo desde **Render (Environment)**.
 
@@ -7,15 +7,17 @@ Bot diseñado para dejar el código público en GitHub y configurar todo desde *
 - **Área privada `🔒 OWNER · STAFF`:** solo Owner, Staff y el bot pueden verla. Staff puede gestionar los canales de esa categoría y utilizar `🤖｜bot-commands`; ahí puede ejecutar `/genkey`, `/update` y `/setstatus`. `/setup`, revocación, ampliación y reseteo de keys siguen reservados al Owner.
 - **Panel de estado dinámico:** el canal `📊｜status` y cada canal de juego muestran el estado guardado en Supabase; Online usa verde, mantenimiento naranja y desactualizado rojo. El emoji del canal y el acento del panel coinciden con el estado. Compra y prueba se desactivan mientras un juego no esté online.
 - **Sin hilos nuevos:** el bot aplica denegaciones de creación de hilos en las categorías y canales sincronizados. Discord siempre permite eludirlo a miembros con `Administrator`.
-- **`/setup` y `/update` idempotentes:** comprueban categorías, roles y canales existentes; sincronizan los paneles sin duplicarlos y se ejecutan también al arrancar el bot.
+- **`/setup` y `/update` idempotentes:** comprueban categorías, roles y canales existentes; sincronizan los paneles y eliminan clones de juegos solo dentro de `🛒 TIENDA · SHOP`, y se ejecutan también al arrancar el bot.
 - **Canales de Tienda profesionales:** Cada juego tiene espacio para **Banner/GIF superior**, descripción, estado con hora dinámica, lista de funciones, bloque de precios (`$1.50`, `$6`, `$12`, `$25`), **captura del menú abajo** y 4 botones interactivos (`Comprar`, `Prueba gratis`, `Funciones`, `Pagos`).
-- **Guía VIP (`📖｜guide`):** Formato completo para clientes en Windows (Kernel e Internal) con banner superior y botón directo de Ticket de Soporte.
+- **Tipos de productos:** Free Fire, Counter-Strike 2 y Roblox se muestran como External; ROB RUN y Minecraft Java siguen como Kernel, incluyendo opciones de `/genkey` y los grupos del panel.
+- **Avisos de mantenimiento:** al cambiar un juego a mantenimiento con `/setstatus`, publica una sola vez en `📢｜announcements` con `@everyone` y el texto “está en mantenimiento hasta nuevo aviso”. Cambiar únicamente la nota no repite el aviso.
+- **Guía VIP (`📖｜guide`):** Formato completo para clientes en Windows (External y Kernel) con banner superior y botón directo de Ticket de Soporte.
 - **Canal de voz 24/7 (`🟢 Soporte en línea`):** Bloqueado para usuarios, el bot se mantiene conectado permanentemente.
 - **Sistema de 1 Día Gratis:** Detecta la captura en el ticket, la envía a `#staff-aprobaciones` y al aprobar manda la key por DM.
 
 ## Estados de los juegos
 
-Owner o Staff pueden actualizar el estado desde `🤖｜bot-commands`, dentro de `🔒 OWNER · STAFF`, usando `/setstatus juego:<juego> estado:<estado> nota:<opcional>`. El estado puede ser `online`, `maintenance` o `outdated`; la nota opcional admite hasta 200 caracteres. El cambio se guarda en Supabase y actualiza al instante el canal del producto y `📊｜status`. El estado permanece al reiniciar Render.
+Owner o Staff pueden actualizar el estado desde `🤖｜bot-commands`, dentro de `🔒 OWNER · STAFF`, usando `/setstatus juego:<juego> estado:<estado> nota:<opcional>`. El estado puede ser `online`, `maintenance` o `outdated`; la nota opcional admite hasta 200 caracteres. El cambio se guarda en Supabase y actualiza al instante el canal del producto y `📊｜status`. Al entrar en mantenimiento, se publica además un aviso con `@everyone` en Anuncios; actualizar una nota sin cambiar de estado no vuelve a notificar. El estado permanece al reiniciar Render.
 
 La migración `migrations/20261124030000_game_statuses.sql` crea `game_statuses` con clave por servidor y juego, validación de valores y RLS habilitado. Solo el rol `service_role` tiene acceso a la tabla.
 
