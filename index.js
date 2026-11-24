@@ -31,7 +31,7 @@ const PORT = process.env.PORT || 3000;
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.get('/', (req, res) => {
-    res.status(200).send('DrakoStore Bot v3.4 Online 24/7');
+    res.status(200).send('DrakoStore Bot v3.5.0 Online 24/7');
 });
 
 app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`));
@@ -46,7 +46,7 @@ function validUrl(value) {
         const url = new URL(value);
         return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
     } catch {
-        console.warn(`[CONFIG] URL ignorada por ser invalida: ${String(value).slice(0, 100)}`);
+        console.warn('[CONFIG] Se ignoró una URL inválida en la configuración.');
         return '';
     }
 }
@@ -80,6 +80,12 @@ const GAME_LOADER_ENV = {
     'roblox': 'LOADER_ROBLOX_URL',
     'robrun': 'LOADER_ROBRUN_URL',
     'minecraft': 'LOADER_MC_URL'
+};
+
+const GAME_STATUSES = {
+    online: { label: 'En línea · Online', emoji: '🟢', color: 0x2ECC71 },
+    maintenance: { label: 'En mantenimiento · Maintenance', emoji: '🟠', color: 0xF39C12 },
+    outdated: { label: 'Desactualizado · Outdated', emoji: '🔴', color: 0xE74C3C }
 };
 
 const PLAN_LABELS = {
@@ -181,6 +187,37 @@ async function supabaseRequest(path, options = {}) {
 
     const text = await res.text();
     return text ? JSON.parse(text) : null;
+}
+
+async function loadGameStatuses(guildId) {
+    const defaults = Object.fromEntries(Object.keys(GAMES).map(gameKey => [gameKey, {
+        status: 'online', note: '', updated_by: null, updated_at: null
+    }]));
+    const rows = await supabaseRequest(`/rest/v1/game_statuses?select=game_key,status,note,updated_by,updated_at&guild_id=eq.${encodeURIComponent(guildId)}&limit=10`);
+    for (const row of Array.isArray(rows) ? rows : []) {
+        if (Object.hasOwn(defaults, row.game_key) && Object.hasOwn(GAME_STATUSES, row.status)) {
+            defaults[row.game_key] = row;
+        }
+    }
+    return defaults;
+}
+
+async function saveGameStatus({ guildId, gameKey, status, note, userId }) {
+    if (!Object.hasOwn(GAMES, gameKey)) throw new Error('Juego no válido.');
+    if (!Object.hasOwn(GAME_STATUSES, status)) throw new Error('Estado no válido.');
+    const rows = await supabaseRequest('/rest/v1/game_statuses?on_conflict=guild_id,game_key', {
+        method: 'POST',
+        headers: { Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({
+            guild_id: guildId,
+            game_key: gameKey,
+            status,
+            note: String(note || '').trim().slice(0, 200),
+            updated_by: userId,
+            updated_at: new Date().toISOString()
+        })
+    });
+    return Array.isArray(rows) ? rows[0] : rows;
 }
 
 async function createTrialClaim(guildId, discordUserId, gameKey) {
@@ -506,6 +543,38 @@ const commands = [
         .setDescription('Actualiza los embeds, imagenes y permisos de todos los canales ya creados'),
 
     new SlashCommandBuilder()
+        .setName('setstatus')
+        .setDescription('Cambia el estado público de un juego')
+        .addStringOption(opt =>
+            opt.setName('juego')
+                .setDescription('Juego que quieres actualizar')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'Free Fire', value: 'free-fire' },
+                    { name: 'Counter-Strike 2', value: 'cs2' },
+                    { name: 'Roblox', value: 'roblox' },
+                    { name: 'ROB RUN', value: 'robrun' },
+                    { name: 'Minecraft Java', value: 'minecraft' }
+                )
+        )
+        .addStringOption(opt =>
+            opt.setName('estado')
+                .setDescription('Estado visible para los clientes')
+                .setRequired(true)
+                .addChoices(
+                    { name: 'En línea · verde', value: 'online' },
+                    { name: 'En mantenimiento · naranja', value: 'maintenance' },
+                    { name: 'Desactualizado · rojo', value: 'outdated' }
+                )
+        )
+        .addStringOption(opt =>
+            opt.setName('nota')
+                .setDescription('Nota opcional para clientes (máximo 200 caracteres)')
+                .setMaxLength(200)
+                .setRequired(false)
+        ),
+
+    new SlashCommandBuilder()
         .setName('genkey')
         .setDescription('Genera una key en Supabase segun juego y plan y la entrega con el link del loader')
         .addStringOption(opt =>
@@ -590,7 +659,7 @@ client.once('clientReady', async () => {
                 Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
                 { body: commands }
             );
-            console.log('[BOT] Slash commands registrados (/setup, /update, /genkey, /resethwid, /revoke, /adddays).');
+            console.log('[BOT] Slash commands registrados (/setup, /update, /setstatus, /genkey, /resethwid, /revoke, /adddays).');
         } catch (err) {
             console.error('[ERROR] Registrando comandos:', err);
         }
@@ -726,9 +795,28 @@ client.on('messageCreate', async (message) => {
 });
 
 // ==================== 7. HELPERS PARA CREAR TICKETS ====================
+async function ensureGameOnlineForInteraction(interaction, gameKey) {
+    let gameStatuses;
+    try {
+        gameStatuses = await loadGameStatuses(interaction.guildId);
+    } catch (err) {
+        console.error('[GAME STATUS CHECK ERROR]', err.message);
+        await interaction.editReply('❌ No se pudo comprobar el estado del juego. Inténtalo de nuevo en unos segundos.');
+        return false;
+    }
+    const state = gameStatuses[gameKey] || { status: 'online', note: '' };
+    if (state.status === 'online') return true;
+    const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
+    const safeNote = String(state.note || '').replace(/@/g, '@\u200b');
+    const note = safeNote ? `\nNota: ${safeNote}` : '';
+    await interaction.editReply(`${appearance.emoji} **${GAMES[gameKey].name} está ${appearance.label.toLowerCase()}.**${note}`);
+    return false;
+}
+
 async function createTrialTicket(interaction, gameKey) {
     const game = GAMES[gameKey];
     const guild = interaction.guild;
+    if (!await ensureGameOnlineForInteraction(interaction, gameKey)) return;
     const claim = await createTrialClaim(guild.id, interaction.user.id, gameKey);
 
     if (claim.claim_status === 'approved') {
@@ -778,6 +866,7 @@ async function createTrialTicket(interaction, gameKey) {
 
 async function createGeneralTicket(interaction, tipo, gameKey = null) {
     const guild = interaction.guild;
+    if (gameKey && !await ensureGameOnlineForInteraction(interaction, gameKey)) return;
     const category = guild.channels.cache.find(
         c => c.type === ChannelType.GuildCategory && c.name.includes('COMUNIDAD')
     );
@@ -847,6 +936,45 @@ client.on('interactionCreate', async (interaction) => {
                     `• Paneles e imágenes actualizados sin duplicados.\n` +
                     `• Bot conectado a **${VOICE_CHANNEL_NAME}**.`
                 );
+            }
+
+            if (interaction.commandName === 'setstatus') {
+                if (!isOwnerOrStaff(interaction)) {
+                    return interaction.reply({ content: 'Solo Owner o Staff pueden cambiar estados.', ephemeral: true });
+                }
+                if (!isStaffOpsChannel(interaction)) {
+                    return interaction.reply({ content: `Usa /setstatus dentro de la categoría privada ${STAFF_CATEGORY_NAME}.`, ephemeral: true });
+                }
+
+                await interaction.deferReply({ ephemeral: true });
+                const gameKey = interaction.options.getString('juego');
+                const status = interaction.options.getString('estado');
+                const note = interaction.options.getString('nota') || '';
+                try {
+                    const statuses = await loadGameStatuses(interaction.guildId);
+                    const savedStatus = await saveGameStatus({
+                        guildId: interaction.guildId,
+                        gameKey,
+                        status,
+                        note,
+                        userId: interaction.user.id
+                    });
+                    statuses[gameKey] = savedStatus || {
+                        status,
+                        note: String(note || '').trim().slice(0, 200),
+                        updated_by: interaction.user.id,
+                        updated_at: new Date().toISOString()
+                    };
+                    await refreshStatusPanels(interaction.guild, statuses);
+                    const statusInfo = GAME_STATUSES[status];
+                    return interaction.editReply(
+                        `${statusInfo.emoji} **${GAMES[gameKey].name}: ${statusInfo.label}.** ` +
+                        (note ? `Nota: ${note}` : 'Panel y canal actualizados.')
+                    );
+                } catch (err) {
+                    console.error('[GAME STATUS ERROR]', err.message);
+                    return interaction.editReply('❌ No se pudo guardar o publicar el estado. Revisa la conexión a Supabase e inténtalo de nuevo.');
+                }
             }
 
             if (interaction.commandName === 'genkey') {
@@ -1258,6 +1386,12 @@ async function ensureCategory(guild, name, overwrites = null, stats, legacyNames
 
 async function ensureChannel(guild, name, type, parentId, { readOnly = false, topic = null, overwrites = null } = {}, stats) {
     let ch = guild.channels.cache.find(c => c.type === type && c.name === name);
+    if (!ch && /^[🟢🟠🔴]｜/.test(name)) {
+        const stableName = name.replace(/^[🟢🟠🔴]｜/, '');
+        ch = guild.channels.cache.find(c =>
+            c.type === type && c.name.replace(/^[🟢🟠🔴]｜/, '') === stableName
+        );
+    }
 
     if (!ch) {
         const opts = { name, type };
@@ -1267,6 +1401,7 @@ async function ensureChannel(guild, name, type, parentId, { readOnly = false, to
         ch = await guild.channels.create(opts);
         stats.created++;
     } else {
+        if (ch.name !== name) await ch.setName(name).catch(() => {});
         if (parentId && ch.parentId !== parentId) {
             await ch.setParent(parentId, { lockPermissions: false }).catch(() => {});
         }
@@ -1339,10 +1474,14 @@ async function upsertBotMessage(channel, payload) {
     return channel.send(payload);
 }
 
-function buildGamePayload(key, g) {
+function buildGamePayload(key, g, gameStatus = { status: 'online', note: '', updated_at: null }) {
     const unixNow = Math.floor(Date.now() / 1000);
     const topBanner = validUrl(process.env[g.bannerEnv]);
     const menuImg = validUrl(process.env[g.menuEnv]);
+    const status = GAME_STATUSES[gameStatus.status] || GAME_STATUSES.online;
+    const updatedUnix = gameStatus.updated_at ? Math.floor(new Date(gameStatus.updated_at).getTime() / 1000) : unixNow;
+    const safeNote = String(gameStatus.note || '').replace(/@/g, '@\u200b');
+    const isAvailable = gameStatus.status === 'online';
 
     const containerItems = [];
 
@@ -1359,10 +1498,11 @@ function buildGamePayload(key, g) {
     containerItems.push({
         type: 10, // TextDisplay
         content:
-            `### 🟢 DrakoStore · ${g.name}\n` +
+            `### ${status.emoji} DrakoStore · ${g.name}\n` +
             `${g.desc}\n` +
             `-# 🛡️ ${g.tagline}\n\n` +
-            `✅ **Funcionando · Working** · \`Windows · ${g.type}\` · 🔄 <t:${unixNow}:R>`
+            `${status.emoji} **${status.label}** · \`Windows · ${g.type}\` · 🔄 <t:${updatedUnix}:R>` +
+            (safeNote ? `\n> ${safeNote}` : '')
     });
 
     containerItems.push({ type: 14, divider: true, spacing: 1 });
@@ -1409,14 +1549,16 @@ function buildGamePayload(key, g) {
                 style: ButtonStyle.Success,
                 custom_id: `buy_direct_${key}`,
                 label: 'Comprar · Buy',
-                emoji: { name: '🛒' }
+                emoji: { name: '🛒' },
+                disabled: !isAvailable
             },
             {
                 type: 2,
                 style: ButtonStyle.Primary,
                 custom_id: `trial_direct_${key}`,
                 label: 'Prueba gratis · Free trial',
-                emoji: { name: '🎁' }
+                emoji: { name: '🎁' },
+                disabled: !isAvailable
             }
         ]
     });
@@ -1452,17 +1594,84 @@ function buildGamePayload(key, g) {
         components: [
             {
                 type: 17, // Container
-                accent_color: COLOR_GREEN,
+                accent_color: status.color,
                 components: containerItems
             }
         ]
     };
 }
 
+function buildStatusOverviewPayload(gameChannels, gameStatuses) {
+    const entries = Object.entries(GAMES).map(([key, game]) => {
+        const state = gameStatuses[key] || { status: 'online', note: '', updated_at: null };
+        const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
+        const channel = gameChannels[key];
+        const note = String(state.note || '').replace(/@/g, '@\u200b');
+        return { key, game, state, appearance, channel, note };
+    });
+    const overall = entries.some(entry => entry.state.status === 'outdated')
+        ? GAME_STATUSES.outdated
+        : entries.some(entry => entry.state.status === 'maintenance')
+            ? GAME_STATUSES.maintenance
+            : GAME_STATUSES.online;
+    const unixNow = Math.floor(Date.now() / 1000);
+    const pcRows = entries.filter(entry => entry.game.type === 'Internal').map(entry =>
+        `${entry.appearance.emoji} **${entry.game.name}** — ${entry.channel || entry.game.channelName}` +
+        (entry.note ? ` · ${entry.note}` : '')
+    );
+    const kernelRows = entries.filter(entry => entry.game.type === 'Kernel').map(entry =>
+        `${entry.appearance.emoji} **${entry.game.name}** — ${entry.channel || entry.game.channelName}` +
+        (entry.note ? ` · ${entry.note}` : '')
+    );
+    return {
+        flags: IS_COMPONENTS_V2,
+        components: [{
+            type: 17,
+            accent_color: overall.color,
+            components: [
+                ...(STATUS_BANNER_URL ? [
+                    { type: 12, items: [{ media: { url: STATUS_BANNER_URL } }] },
+                    { type: 14, divider: true, spacing: 1 }
+                ] : []),
+                { type: 10, content: `### ${overall.emoji} DrakoStore · Estado del servicio\n${overall.label}\n-# 🔄 Revisado <t:${unixNow}:R>` },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 10, content: `**💉 PC · Internals (Windows)**\n${pcRows.join('\n')}` },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 10, content: `**⚡ PC · Kernel (Windows)**\n${kernelRows.join('\n')}` },
+                { type: 14, divider: true, spacing: 1 },
+                { type: 10, content: `-# 🟢 En línea · 🟠 En mantenimiento · 🔴 Desactualizado · ${WEB_URL}` }
+            ]
+        }]
+    };
+}
+
+async function refreshStatusPanels(guild, gameStatuses) {
+    await guild.channels.fetch();
+    const gameChannels = {};
+    for (const [key, game] of Object.entries(GAMES)) {
+        const channel = guild.channels.cache.find(ch =>
+            ch.type === ChannelType.GuildText &&
+            ch.name.replace(/^[🟢🟠🔴]｜/, '') === game.channelName.replace(/^[🟢🟠🔴]｜/, '')
+        );
+        if (!channel) continue;
+        const state = gameStatuses[key] || { status: 'online', note: '' };
+        const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
+        const desiredName = game.channelName.replace(/^[🟢🟠🔴]/, appearance.emoji);
+        if (channel.name !== desiredName) await channel.setName(desiredName);
+        gameChannels[key] = channel;
+        await upsertBotMessage(channel, buildGamePayload(key, game, state));
+    }
+    const statusChannel = guild.channels.cache.find(ch => ch.name === '📊｜status');
+    if (statusChannel) {
+        await upsertBotMessage(statusChannel, buildStatusOverviewPayload(gameChannels, gameStatuses));
+    }
+}
+
 async function syncServer(guild) {
     await guild.channels.fetch();
     const stats = { created: 0, updated: 0, rolesCreated: 0, rolesUpdated: 0 };
 
+    const gameStatuses = await loadGameStatuses(guild.id);
     const roles = await syncRoles(guild, stats);
 
     // 1) CANAL DE VOZ 24/7 BLOQUEADO
@@ -1500,9 +1709,12 @@ async function syncServer(guild) {
     const catShop = await ensureCategory(guild, '🛒 TIENDA · SHOP', null, stats);
     const gameChannels = {};
     for (const [key, g] of Object.entries(GAMES)) {
-        const ch = await ensureChannel(guild, g.channelName, ChannelType.GuildText, catShop.id, { readOnly: true, topic: g.topic }, stats);
+        const state = gameStatuses[key] || { status: 'online', note: '' };
+        const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
+        const channelName = g.channelName.replace(/^[🟢🟠🔴]/, appearance.emoji);
+        const ch = await ensureChannel(guild, channelName, ChannelType.GuildText, catShop.id, { readOnly: true, topic: g.topic }, stats);
         gameChannels[key] = ch;
-        await upsertBotMessage(ch, buildGamePayload(key, g));
+        await upsertBotMessage(ch, buildGamePayload(key, g, state));
     }
 
     // 4) NOVEDADES · NEWS
@@ -1541,54 +1753,15 @@ async function syncServer(guild) {
         ['🔒 STAFF']
     );
     await ensureChannel(guild, 'staff-aprobaciones', ChannelType.GuildText, catStaff.id, { topic: 'Panel privado para aprobar capturas de 1 día gratis' }, stats);
-    await ensureChannel(guild, '🤖｜bot-commands', ChannelType.GuildText, catStaff.id, { topic: 'Comandos privados del bot: /update y /genkey' }, stats);
+    await ensureChannel(guild, '🤖｜bot-commands', ChannelType.GuildText, catStaff.id, { topic: 'Comandos privados del bot: /update, /genkey y /setstatus' }, stats);
     await ensureChannel(guild, '🚀｜staff-updates', ChannelType.GuildText, catStaff.id, { topic: 'Registro interno de cambios y despliegues' }, stats);
 
     await disableThreadCreation(guild);
 
     // ==================== ACTUALIZAR PANELES PRINCIPALES (COMPONENTS V2 UNIFICADO) ====================
 
-    // A) STATUS EN VIVO
-    const unixNow = Math.floor(Date.now() / 1000);
-    const statusItems = [];
-    if (STATUS_BANNER_URL) {
-        statusItems.push({ type: 12, items: [{ media: { url: STATUS_BANNER_URL } }] });
-        statusItems.push({ type: 14, divider: true, spacing: 1 });
-    }
-    statusItems.push(
-        {
-            type: 10,
-            content:
-                `### ✅ Todo funcionando · All working\n` +
-                `🔄 Actualizado <t:${unixNow}:R>`
-        },
-        { type: 14, divider: true, spacing: 1 },
-        {
-            type: 10,
-            content:
-                `**💉 PC · Internals (Windows)**\n` +
-                `✅ **Free Fire** — ${gameChannels['free-fire']}\n` +
-                `✅ **Counter-Strike 2** — ${gameChannels['cs2']}\n` +
-                `✅ **Roblox** — ${gameChannels['roblox']}`
-        },
-        { type: 14, divider: true, spacing: 1 },
-        {
-            type: 10,
-            content:
-                `**⚡ PC · Kernel (Windows)**\n` +
-                `✅ **ROB RUN** — ${gameChannels['robrun']}\n` +
-                `✅ **Minecraft Java** — ${gameChannels['minecraft']}`
-        },
-        { type: 14, divider: true, spacing: 1 },
-        {
-            type: 10,
-            content: `-# 🌐 Catálogo oficial: ${WEB_URL} · DrakoStore Live Status`
-        }
-    );
-    await upsertBotMessage(chStatus, {
-        flags: IS_COMPONENTS_V2,
-        components: [{ type: 17, accent_color: COLOR_GREEN, components: statusItems }]
-    });
+    // A) PANEL DE ESTADO EN VIVO
+    await upsertBotMessage(chStatus, buildStatusOverviewPayload(gameChannels, gameStatuses));
 
     // B) HOW TO BUY
     const buyItems = [];

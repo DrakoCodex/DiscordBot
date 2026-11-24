@@ -1,16 +1,23 @@
-# DrakoStore Bot v3.4
+# DrakoStore Bot v3.5.0
 
 Bot diseñado para dejar el código público en GitHub y configurar todo desde **Render (Environment)**.
 
-## Novedades de la v3.2
+## Novedades de la v3.5
 - **Roles con colores y jerarquía automática:** `👑 Owner` rojo (Administrador y auto-asignado al dueño), `🛡️ Staff` morado, `🤝 Partner`, `🤖 Bots` azul (auto-asignado a bots), `💎 Clientes` celeste y `Miembro` negro (`hoist: false`, para no clientes).
-- **Área privada `🔒 OWNER · STAFF`:** solo Owner, Staff y el bot pueden verla. Staff puede gestionar los canales de esa categoría y utilizar `🤖｜bot-commands`; ahí puede ejecutar `/genkey` y `/update`. `/setup`, revocación, ampliación y reseteo de keys siguen reservados al Owner.
+- **Área privada `🔒 OWNER · STAFF`:** solo Owner, Staff y el bot pueden verla. Staff puede gestionar los canales de esa categoría y utilizar `🤖｜bot-commands`; ahí puede ejecutar `/genkey`, `/update` y `/setstatus`. `/setup`, revocación, ampliación y reseteo de keys siguen reservados al Owner.
+- **Panel de estado dinámico:** el canal `📊｜status` y cada canal de juego muestran el estado guardado en Supabase; Online usa verde, mantenimiento naranja y desactualizado rojo. El emoji del canal y el acento del panel coinciden con el estado. Compra y prueba se desactivan mientras un juego no esté online.
 - **Sin hilos nuevos:** el bot aplica denegaciones de creación de hilos en las categorías y canales sincronizados. Discord siempre permite eludirlo a miembros con `Administrator`.
 - **`/setup` y `/update` idempotentes:** comprueban categorías, roles y canales existentes; sincronizan los paneles sin duplicarlos y se ejecutan también al arrancar el bot.
 - **Canales de Tienda profesionales:** Cada juego tiene espacio para **Banner/GIF superior**, descripción, estado con hora dinámica, lista de funciones, bloque de precios (`$1.50`, `$6`, `$12`, `$25`), **captura del menú abajo** y 4 botones interactivos (`Comprar`, `Prueba gratis`, `Funciones`, `Pagos`).
 - **Guía VIP (`📖｜guide`):** Formato completo para clientes en Windows (Kernel e Internal) con banner superior y botón directo de Ticket de Soporte.
 - **Canal de voz 24/7 (`🟢 Soporte en línea`):** Bloqueado para usuarios, el bot se mantiene conectado permanentemente.
 - **Sistema de 1 Día Gratis:** Detecta la captura en el ticket, la envía a `#staff-aprobaciones` y al aprobar manda la key por DM.
+
+## Estados de los juegos
+
+Owner o Staff pueden actualizar el estado desde `🤖｜bot-commands`, dentro de `🔒 OWNER · STAFF`, usando `/setstatus juego:<juego> estado:<estado> nota:<opcional>`. El estado puede ser `online`, `maintenance` o `outdated`; la nota opcional admite hasta 200 caracteres. El cambio se guarda en Supabase y actualiza al instante el canal del producto y `📊｜status`. El estado permanece al reiniciar Render.
+
+La migración `migrations/20261124030000_game_statuses.sql` crea `game_statuses` con clave por servidor y juego, validación de valores y RLS habilitado. Solo el rol `service_role` tiene acceso a la tabla.
 
 ## Imágenes y assets
 Los banners de bienvenida, guía, compra y reglas están incluidos en `assets/` y se sirven desde `/assets/` en el servicio web de Render. Render proporciona la base pública automáticamente; se puede sobrescribir con `PUBLIC_ASSET_BASE_URL`. Las imágenes de productos siguen configurándose con URLs de `.env.example`.
@@ -24,7 +31,7 @@ La aprobación usa la función SQL `approve_trial`, que crea la licencia y marca
 Para desplegar una copia nueva:
 
 1. Crea la tabla `licenses` con las columnas que usa el bot (`id`, `key`, `game`, `duration_days`, `status`, `discord_user_id`, `hwid`, `activated_at`, `expires_at` y `created_at`).
-2. Ejecuta la migración de `migrations/20261123030500_trial_claims.sql` en el proyecto Supabase.
+2. Ejecuta las migraciones de `migrations/` en el proyecto Supabase (incluye `trial_claims` y `game_statuses`).
 3. Configura `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` únicamente en Render. Nunca publiques la clave `service_role` en GitHub, el navegador o el loader.
 4. Configura las URLs de los loaders y las imágenes indicadas en `.env.example`.
 
