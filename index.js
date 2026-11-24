@@ -88,6 +88,14 @@ const GAME_STATUSES = {
     outdated: { label: 'Desactualizado · Outdated', emoji: '🔴', color: 0xE74C3C }
 };
 
+function normalizeGameChannelName(name) {
+    return name.replace(/^(?:(?:🟢|🟠|🔴)(?:�)?|�)｜/u, '');
+}
+
+function setGameChannelStatusName(name, emoji) {
+    return name.replace(/^(?:(?:🟢|🟠|🔴)(?:�)?|�)(?=｜)/u, emoji);
+}
+
 const PLAN_LABELS = {
     1: '1 Día ($1.50 USD)',
     7: '7 Días ($6 USD)',
@@ -1386,11 +1394,27 @@ async function ensureCategory(guild, name, overwrites = null, stats, legacyNames
 
 async function ensureChannel(guild, name, type, parentId, { readOnly = false, topic = null, overwrites = null } = {}, stats) {
     let ch = guild.channels.cache.find(c => c.type === type && c.name === name);
-    if (!ch && /^[🟢🟠🔴]｜/.test(name)) {
-        const stableName = name.replace(/^[🟢🟠🔴]｜/, '');
+    if (!ch && normalizeGameChannelName(name) !== name) {
+        const stableName = normalizeGameChannelName(name);
         ch = guild.channels.cache.find(c =>
-            c.type === type && c.name.replace(/^[🟢🟠🔴]｜/, '') === stableName
+            c.type === type && normalizeGameChannelName(c.name) === stableName
         );
+    }
+    if (ch && normalizeGameChannelName(name) !== name) {
+        const stableName = normalizeGameChannelName(name);
+        const malformedDuplicates = guild.channels.cache.filter(c =>
+            c.id !== ch.id && c.type === type &&
+            /^(?:🟢|🟠|🔴)�｜/u.test(c.name) &&
+            normalizeGameChannelName(c.name) === stableName
+        );
+        for (const duplicate of malformedDuplicates.values()) {
+            try {
+                await duplicate.delete('Remove malformed duplicate game status channel');
+                console.log(`[STATUS] Canal duplicado malformado eliminado: ${duplicate.name}`);
+            } catch (err) {
+                console.warn(`[STATUS] No se pudo quitar el canal duplicado ${duplicate.name}: ${err.message}`);
+            }
+        }
     }
 
     if (!ch) {
@@ -1649,14 +1673,17 @@ async function refreshStatusPanels(guild, gameStatuses) {
     await guild.channels.fetch();
     const gameChannels = {};
     for (const [key, game] of Object.entries(GAMES)) {
-        const channel = guild.channels.cache.find(ch =>
-            ch.type === ChannelType.GuildText &&
-            ch.name.replace(/^[🟢🟠🔴]｜/, '') === game.channelName.replace(/^[🟢🟠🔴]｜/, '')
-        );
-        if (!channel) continue;
         const state = gameStatuses[key] || { status: 'online', note: '' };
         const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
-        const desiredName = game.channelName.replace(/^[🟢🟠🔴]/, appearance.emoji);
+        const desiredName = setGameChannelStatusName(game.channelName, appearance.emoji);
+        const stableName = normalizeGameChannelName(game.channelName);
+        const channel = guild.channels.cache.find(ch =>
+            ch.type === ChannelType.GuildText && ch.name === desiredName
+        ) || guild.channels.cache.find(ch =>
+            ch.type === ChannelType.GuildText &&
+            normalizeGameChannelName(ch.name) === stableName
+        );
+        if (!channel) continue;
         if (channel.name !== desiredName) await channel.setName(desiredName);
         gameChannels[key] = channel;
         await upsertBotMessage(channel, buildGamePayload(key, game, state));
@@ -1711,7 +1738,7 @@ async function syncServer(guild) {
     for (const [key, g] of Object.entries(GAMES)) {
         const state = gameStatuses[key] || { status: 'online', note: '' };
         const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
-        const channelName = g.channelName.replace(/^[🟢🟠🔴]/, appearance.emoji);
+        const channelName = setGameChannelStatusName(g.channelName, appearance.emoji);
         const ch = await ensureChannel(guild, channelName, ChannelType.GuildText, catShop.id, { readOnly: true, topic: g.topic }, stats);
         gameChannels[key] = ch;
         await upsertBotMessage(ch, buildGamePayload(key, g, state));
