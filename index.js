@@ -31,7 +31,7 @@ const PORT = process.env.PORT || 3000;
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.get('/', (req, res) => {
-    res.status(200).send('DrakoStore Bot v3.6.0 Online 24/7');
+    res.status(200).send('DrakoStore Bot v3.6.1 Online 24/7');
 });
 
 app.listen(PORT, () => console.log(`[HTTP] Keep-alive activo en puerto ${PORT}`));
@@ -959,6 +959,7 @@ client.on('interactionCreate', async (interaction) => {
                 const status = interaction.options.getString('estado');
                 const note = interaction.options.getString('nota') || '';
                 try {
+                    console.log(`[GAME STATUS] Solicitud: ${gameKey} -> ${status} por ${interaction.user.id}`);
                     const statuses = await loadGameStatuses(interaction.guildId);
                     const previousStatus = statuses[gameKey]?.status || 'online';
                     const savedStatus = await saveGameStatus({
@@ -974,7 +975,10 @@ client.on('interactionCreate', async (interaction) => {
                         updated_by: interaction.user.id,
                         updated_at: new Date().toISOString()
                     };
-                    await refreshStatusPanels(interaction.guild, statuses);
+                    const statusInfo = GAME_STATUSES[status];
+                    await interaction.editReply(`${statusInfo.emoji} Estado guardado para **${GAMES[gameKey].name}**. Actualizando su panel...`);
+                    await refreshStatusPanels(interaction.guild, statuses, gameKey);
+                    console.log(`[GAME STATUS] Panel actualizado: ${gameKey} -> ${status}`);
                     if (status === 'maintenance' && previousStatus !== 'maintenance') {
                         const announcements = interaction.guild.channels.cache.find(ch =>
                             ch.type === ChannelType.GuildText && ch.name === '📢｜announcements'
@@ -993,7 +997,6 @@ client.on('interactionCreate', async (interaction) => {
                             console.warn('[ANNOUNCEMENT] No se encontró 📢｜announcements.');
                         }
                     }
-                    const statusInfo = GAME_STATUSES[status];
                     return interaction.editReply(
                         `${statusInfo.emoji} **${GAMES[gameKey].name}: ${statusInfo.label}.** ` +
                         (note ? `Nota: ${note}` : 'Panel y canal actualizados.')
@@ -1731,10 +1734,14 @@ function buildStatusOverviewPayload(gameChannels, gameStatuses) {
     };
 }
 
-async function refreshStatusPanels(guild, gameStatuses) {
+async function refreshStatusPanels(guild, gameStatuses, onlyGameKey = null) {
     await guild.channels.fetch();
     const gameChannels = {};
-    for (const [key, game] of Object.entries(GAMES)) {
+    const gamesToRefresh = onlyGameKey
+        ? [[onlyGameKey, GAMES[onlyGameKey]]]
+        : Object.entries(GAMES);
+    for (const [key, game] of gamesToRefresh) {
+        if (!game) continue;
         const state = gameStatuses[key] || { status: 'online', note: '' };
         const appearance = GAME_STATUSES[state.status] || GAME_STATUSES.online;
         const desiredName = setGameChannelStatusName(game.channelName, appearance.emoji);

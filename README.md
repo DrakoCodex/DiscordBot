@@ -1,4 +1,4 @@
-# DrakoStore Bot v3.6.0
+# DrakoStore Bot v3.6.1
 
 Bot diseñado para dejar el código público en GitHub y configurar todo desde **Render (Environment)**.
 
@@ -17,7 +17,7 @@ Bot diseñado para dejar el código público en GitHub y configurar todo desde *
 
 ## Estados de los juegos
 
-Owner o Staff pueden actualizar el estado desde `🤖｜bot-commands`, dentro de `🔒 OWNER · STAFF`, usando `/setstatus juego:<juego> estado:<estado> nota:<opcional>`. El estado puede ser `online`, `maintenance` o `outdated`; la nota opcional admite hasta 200 caracteres. El cambio se guarda en Supabase y actualiza al instante el canal del producto y `📊｜status`. Al entrar en mantenimiento, se publica además un aviso con `@everyone` en Anuncios; actualizar una nota sin cambiar de estado no vuelve a notificar. El estado permanece al reiniciar Render.
+Owner o Staff pueden actualizar el estado desde `🤖｜bot-commands`, dentro de `🔒 OWNER · STAFF`, usando `/setstatus juego:<juego> estado:<estado> nota:<opcional>`. El estado puede ser `online`, `maintenance` o `outdated`; la nota opcional admite hasta 200 caracteres. El cambio se guarda en Supabase; el bot confirma el guardado antes de actualizar únicamente el canal del producto seleccionado y `📊｜status`. Al entrar en mantenimiento, se publica además un aviso con `@everyone` en Anuncios; actualizar una nota sin cambiar de estado no vuelve a notificar. El estado permanece al reiniciar Render.
 
 La migración `migrations/20261124030000_game_statuses.sql` crea `game_statuses` con clave por servidor y juego, validación de valores y RLS habilitado. Solo el rol `service_role` tiene acceso a la tabla.
 
