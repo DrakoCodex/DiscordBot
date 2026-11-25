@@ -28,6 +28,24 @@ const {
 // ==================== 1. KEEP-ALIVE PARA RENDER + UPTIMEROBOT ====================
 const app = express();
 const PORT = process.env.PORT || 3000;
+app.use(express.json({ limit: '16kb' }));
+const PANEL_ORIGINS = new Set([
+    'https://8328-i5cp9t3bkvdhux4r0hmp6-7750d021.us3.manus.computer',
+    ...(process.env.PANEL_ALLOWED_ORIGINS || '').split(',').map(v => v.trim()).filter(Boolean),
+    ...(process.env.NODE_ENV === 'production' ? [] : ['http://localhost:5173', 'http://127.0.0.1:5173'])
+]);
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && !PANEL_ORIGINS.has(origin)) return res.sendStatus(403);
+    if (origin && PANEL_ORIGINS.has(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') return res.sendStatus(origin && PANEL_ORIGINS.has(origin) ? 204 : 403);
+    next();
+});
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 app.get('/', (req, res) => {
@@ -300,6 +318,184 @@ function isOwnerOrStaff(interaction) {
     return isOwner(interaction) || isStaff(interaction);
 }
 
+const panelCodes = new Map();
+const panelSessions = new Map();
+const panelExchanges = new Map();
+const panelAnnouncements = new Map();
+const hashPanelSecret = value => crypto.createHash('sha256').update(value).digest('hex');
+
+function panelMemberIsStaff(member, guild) {
+    return Boolean(member && (member.id === guild.ownerId || member.roles.cache.some(role =>
+        ['👑 Owner', '🛡️ Staff', 'Staff'].includes(role.name)
+    )));
+}
+
+async function authorizePanel(req, res, next) {
+    const bearer = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
+    const session = bearer && panelSessions.get(hashPanelSecret(bearer));
+    if (!session || session.expiresAt <= Date.now()) return res.status(401).json({ error: 'unauthorized' });
+    try {
+        const guild = client.guilds.cache.get(process.env.GUILD_ID);
+        if (!guild || guild.id !== process.env.GUILD_ID) return res.status(503).json({ error: 'guild_unavailable' });
+        const member = await guild.members.fetch(session.userId);
+        if (!panelMemberIsStaff(member, guild)) {
+            panelSessions.delete(hashPanelSecret(bearer));
+            return res.status(403).json({ error: 'forbidden' });
+        }
+        req.panelUser = { id: member.id, displayName: member.displayName || member.user.username,
+            role: member.id === guild.ownerId || member.roles.cache.some(r => r.name === '👑 Owner') ? 'owner' : 'staff' };
+        req.panelGuild = guild;
+        next();
+    } catch { return res.status(401).json({ error: 'member_unavailable' }); }
+}
+
+app.post('/api/panel/auth/exchange', (req, res) => {
+    const ip = req.ip;
+    const now = Date.now();
+    const attempts = (panelExchanges.get(ip) || []).filter(t => now - t < 300000);
+    if (attempts.length >= 5) return res.status(429).json({ error: 'rate_limited' });
+    attempts.push(now); panelExchanges.set(ip, attempts);
+    const code = String(req.body?.code || '');
+    if (!/^\d{8}$/.test(code)) return res.status(401).json({ error: 'invalid_code' });
+    const digest = hashPanelSecret(code);
+    const entry = panelCodes.get(digest);
+    if (!entry || entry.expiresAt <= now) return res.status(401).json({ error: 'invalid_code' });
+    panelCodes.delete(digest);
+    const token = crypto.randomBytes(32).toString('base64url');
+    panelSessions.set(hashPanelSecret(token), { userId: entry.userId, expiresAt: now + 4 * 60 * 60 * 1000 });
+    res.json({ token, user: { displayName: entry.displayName, role: entry.role } });
+});
+
+app.get('/api/panel/auth/me', authorizePanel, (req, res) => res.json({ user: { displayName: req.panelUser.displayName, role: req.panelUser.role } }));
+app.post('/api/panel/auth/logout', authorizePanel, (req, res) => {
+    const token = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '')?.[1];
+    panelSessions.delete(hashPanelSecret(token)); res.sendStatus(204);
+});
+
+app.get('/api/panel/bootstrap', authorizePanel, async (req, res) => {
+    try {
+        const statuses = await loadGameStatuses(req.panelGuild.id);
+        res.json({ games: Object.entries(GAMES).map(([id, game]) => {
+            const state = statuses[id] || { status: 'online', note: '', updated_at: null };
+            return { id, name: game.name, short: game.slug, type: game.type, platform: 'Windows',
+                status: state.status, note: state.note || '', updatedAt: state.updated_at || null };
+        }), announcementChannel: '📢｜announcements' });
+    } catch (err) { console.error('[PANEL BOOTSTRAP]', err.message); res.status(503).json({ error: 'data_unavailable' }); }
+});
+
+app.get('/api/panel/activity', authorizePanel, async (req, res) => {
+    try {
+        const statuses = await loadGameStatuses(req.panelGuild.id);
+        res.json({ activities: Object.entries(statuses).map(([gameKey, s]) => ({ gameKey, status: s.status, updatedAt: s.updated_at || null, updatedBy: s.updated_by ? 'Owner/Staff' : null })) });
+    } catch (err) { console.error('[PANEL ACTIVITY]', err.message); res.status(503).json({ error: 'data_unavailable' }); }
+});
+
+app.get('/api/panel/licenses', authorizePanel, async (req, res) => {
+    if (!SUPABASE_SERVICE_ROLE_KEY) return res.status(503).json({ error: 'data_unavailable' });
+    const offset = Number(req.query.offset ?? 0), limit = Number(req.query.limit ?? 50);
+    if (!Number.isInteger(offset) || offset < 0 || offset > 50000 || !Number.isInteger(limit) || limit < 1 || limit > 100)
+        return res.status(400).json({ error: 'invalid_pagination' });
+    try {
+        const params = new URLSearchParams({ select: 'key,game,duration_days,status,hwid,activated_at,expires_at,created_at', order: 'created_at.desc', limit: String(limit + 1), offset: String(offset) });
+        const rows = await supabaseRequest(`/rest/v1/licenses?${params}`);
+        const now = Date.now();
+        const licenses = (Array.isArray(rows) ? rows : []).slice(0, limit).map(row => {
+            const key = String(row.key || '');
+            const expiry = row.expires_at ? new Date(row.expires_at).getTime() : null;
+            const status = row.status === 'active' && expiry !== null && expiry <= now ? 'expired' : row.status;
+            return { reference: `••••${key.slice(-4)}`, game: row.game, durationDays: row.duration_days,
+                status, hasPc: Boolean(row.hwid), activatedAt: row.activated_at || null, expiresAt: row.expires_at || null,
+                remainingSeconds: expiry === null ? null : Math.max(0, Math.floor((expiry - now) / 1000)) };
+        });
+        res.json({ licenses, hasMore: rows.length > limit, asOf: new Date(now).toISOString() });
+    } catch (err) { console.error('[PANEL LICENSES]', err.message); res.status(503).json({ error: 'data_unavailable' }); }
+});
+
+async function sendMaintenanceAnnouncement(guild, gameKey, note = '') {
+    const game = GAMES[gameKey];
+    if (!game) throw new Error('Juego no válido.');
+    await guild.channels.fetch();
+    const channel = guild.channels.cache.find(ch => ch.type === ChannelType.GuildText && ch.name === '📢｜announcements');
+    if (!channel) throw new Error('No se encontró el canal de anuncios.');
+    const safeNote = String(note || '').trim().slice(0, 200).replace(/@/g, '@\u200b');
+    await channel.send({ content: `@everyone ⚠️ **${game.name} está en mantenimiento hasta nuevo aviso.**${safeNote ? `\n${safeNote}` : ''}`, allowedMentions: { parse: ['everyone'] } });
+}
+
+const gameStatusQueues = new Map();
+const pendingMaintenanceAnnouncements = new Set();
+async function withGameStatusLock(key, operation) {
+    const previous = gameStatusQueues.get(key) || Promise.resolve();
+    let release;
+    const current = new Promise(resolve => { release = resolve; });
+    const tail = previous.then(() => current);
+    gameStatusQueues.set(key, tail);
+    await previous;
+    try { return await operation(); }
+    finally {
+        release();
+        if (gameStatusQueues.get(key) === tail) gameStatusQueues.delete(key);
+    }
+}
+
+async function updateGameStatus(guild, { gameKey, status, note, userId }) {
+    const lockKey = `${guild.id}:${gameKey}`;
+    return withGameStatusLock(lockKey, async () => {
+        const statuses = await loadGameStatuses(guild.id);
+        const previous = statuses[gameKey]?.status || 'online';
+        const saved = await saveGameStatus({ guildId: guild.id, gameKey, status, note, userId });
+        statuses[gameKey] = saved || { status, note: String(note || '').trim().slice(0, 200), updated_by: userId, updated_at: new Date().toISOString() };
+        if (status === 'maintenance' && previous !== 'maintenance') pendingMaintenanceAnnouncements.add(lockKey);
+        if (status !== 'maintenance') pendingMaintenanceAnnouncements.delete(lockKey);
+        await refreshStatusPanels(guild, statuses, gameKey);
+        if (status === 'maintenance' && pendingMaintenanceAnnouncements.has(lockKey)) {
+            await sendMaintenanceAnnouncement(guild, gameKey);
+            pendingMaintenanceAnnouncements.delete(lockKey);
+        }
+        return { statuses, previous };
+    });
+}
+
+app.post('/api/panel/status', authorizePanel, async (req, res) => {
+    const { gameKey, status } = req.body || {};
+    const note = typeof req.body?.note === 'string' ? req.body.note : '';
+    if (!Object.hasOwn(GAMES, gameKey) || !Object.hasOwn(GAME_STATUSES, status) || note.length > 200)
+        return res.status(400).json({ error: 'invalid_status' });
+    try {
+        await updateGameStatus(req.panelGuild, { gameKey, status, note, userId: req.panelUser.id });
+        res.json({ ok: true });
+    } catch (err) { console.error('[PANEL STATUS]', err.message); res.status(503).json({ error: 'update_failed' }); }
+});
+
+app.post('/api/panel/maintenance-announcement', authorizePanel, async (req, res) => {
+    const { gameKey, requestId } = req.body || {};
+    const note = typeof req.body?.note === 'string' ? req.body.note : '';
+    if (!Object.hasOwn(GAMES, gameKey) || note.length > 200 || typeof requestId !== 'string' || requestId.length < 1 || requestId.length > 100)
+        return res.status(400).json({ error: 'invalid_request' });
+    const requestKey = `${req.panelGuild.id}:${requestId}`;
+    const existing = panelAnnouncements.get(requestKey);
+    if (existing) {
+        try { if (existing.promise) await existing.promise; return res.json({ ok: true, duplicate: true }); }
+        catch (err) { return res.status(err.code === 'not_in_maintenance' ? 409 : 503).json({ error: err.code || 'announcement_failed' }); }
+    }
+    const sendPromise = (async () => {
+        const statuses = await loadGameStatuses(req.panelGuild.id);
+        if ((statuses[gameKey]?.status || 'online') !== 'maintenance') {
+            const err = new Error('not_in_maintenance'); err.code = 'not_in_maintenance'; throw err;
+        }
+        await sendMaintenanceAnnouncement(req.panelGuild, gameKey, note);
+    })();
+    panelAnnouncements.set(requestKey, { promise: sendPromise });
+    try {
+        await sendPromise;
+        panelAnnouncements.set(requestKey, Date.now());
+        res.json({ ok: true });
+    } catch (err) {
+        panelAnnouncements.delete(requestKey);
+        if (err.code === 'not_in_maintenance') return res.status(409).json({ error: 'not_in_maintenance' });
+        console.error('[PANEL ANNOUNCEMENT]', err.message); res.status(503).json({ error: 'announcement_failed' });
+    }
+});
+
 function isStaffOpsChannel(interaction) {
     return interaction.channel?.parent?.name === STAFF_CATEGORY_NAME;
 }
@@ -541,6 +737,10 @@ function connectToSupportVoice(guild) {
 
 // ==================== 4. SLASH COMMANDS ====================
 const commands = [
+    new SlashCommandBuilder()
+        .setName('panel-login')
+        .setDescription('Genera un código de acceso temporal para el panel web'),
+
     new SlashCommandBuilder()
         .setName('setup')
         .setDescription('Crea o verifica todos los canales, roles y paneles sin duplicar nada')
@@ -923,6 +1123,20 @@ client.on('interactionCreate', async (interaction) => {
     try {
         // --- SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
+            if (interaction.commandName === 'panel-login') {
+                const guild = interaction.guild;
+                if (!guild || guild.id !== process.env.GUILD_ID || !isOwnerOrStaff(interaction)) {
+                    return interaction.reply({ content: 'Solo Owner o Staff del servidor autorizado pueden iniciar sesión.', ephemeral: true });
+                }
+                const code = String(crypto.randomInt(0, 100000000)).padStart(8, '0');
+                const expiresAt = Date.now() + 2 * 60 * 1000;
+                panelCodes.set(hashPanelSecret(code), { userId: interaction.user.id,
+                    displayName: interaction.member?.displayName || interaction.user.username,
+                    role: isOwner(interaction) ? 'owner' : 'staff', expiresAt });
+                setTimeout(() => panelCodes.delete(hashPanelSecret(code)), 2 * 60 * 1000).unref?.();
+                return interaction.reply({ content: `Código de acceso (válido por 2 minutos y de un solo uso): **${code}**`, ephemeral: true });
+            }
+
             if (interaction.commandName === 'setup' || interaction.commandName === 'update') {
                 if (interaction.commandName === 'setup' && !isOwner(interaction)) {
                     return interaction.reply({ content: 'Solo el Owner puede ejecutar /setup.', ephemeral: true });
@@ -960,43 +1174,10 @@ client.on('interactionCreate', async (interaction) => {
                 const note = interaction.options.getString('nota') || '';
                 try {
                     console.log(`[GAME STATUS] Solicitud: ${gameKey} -> ${status} por ${interaction.user.id}`);
-                    const statuses = await loadGameStatuses(interaction.guildId);
-                    const previousStatus = statuses[gameKey]?.status || 'online';
-                    const savedStatus = await saveGameStatus({
-                        guildId: interaction.guildId,
-                        gameKey,
-                        status,
-                        note,
-                        userId: interaction.user.id
-                    });
-                    statuses[gameKey] = savedStatus || {
-                        status,
-                        note: String(note || '').trim().slice(0, 200),
-                        updated_by: interaction.user.id,
-                        updated_at: new Date().toISOString()
-                    };
                     const statusInfo = GAME_STATUSES[status];
                     await interaction.editReply(`${statusInfo.emoji} Estado guardado para **${GAMES[gameKey].name}**. Actualizando su panel...`);
-                    await refreshStatusPanels(interaction.guild, statuses, gameKey);
+                    await updateGameStatus(interaction.guild, { gameKey, status, note, userId: interaction.user.id });
                     console.log(`[GAME STATUS] Panel actualizado: ${gameKey} -> ${status}`);
-                    if (status === 'maintenance' && previousStatus !== 'maintenance') {
-                        const announcements = interaction.guild.channels.cache.find(ch =>
-                            ch.type === ChannelType.GuildText && ch.name === '📢｜announcements'
-                        );
-                        if (announcements) {
-                            try {
-                                await announcements.send({
-                                    content: `@everyone ⚠️ **${GAMES[gameKey].name} está en mantenimiento hasta nuevo aviso.**`,
-                                    allowedMentions: { parse: ['everyone'] }
-                                });
-                                console.log(`[ANNOUNCEMENT] Mantenimiento anunciado: ${GAMES[gameKey].name}`);
-                            } catch (err) {
-                                console.error(`[ANNOUNCEMENT ERROR] No se pudo anunciar mantenimiento de ${GAMES[gameKey].name}:`, err.message);
-                            }
-                        } else {
-                            console.warn('[ANNOUNCEMENT] No se encontró 📢｜announcements.');
-                        }
-                    }
                     return interaction.editReply(
                         `${statusInfo.emoji} **${GAMES[gameKey].name}: ${statusInfo.label}.** ` +
                         (note ? `Nota: ${note}` : 'Panel y canal actualizados.')
