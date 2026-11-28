@@ -101,6 +101,8 @@ const GAME_LOADER_ENV = {
     'robrun': 'LOADER_ROBRUN_URL',
     'minecraft': 'LOADER_MC_URL'
 };
+const FREE_TRIAL_MIN_ACCOUNT_AGE_DAYS = 30;
+const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const GAME_STATUSES = {
     online: { label: 'En línea · Online', emoji: '🟢', color: 0x2ECC71 },
@@ -265,6 +267,16 @@ async function getPendingTrialByChannel(channelId) {
         select: 'id,guild_id,discord_user_id,game_key,status,ticket_channel_id,evidence_url,review_message_id',
         ticket_channel_id: `eq.${channelId}`,
         status: 'eq.pending',
+        limit: '1'
+    });
+    const rows = await supabaseRequest(`/rest/v1/trial_claims?${params}`);
+    return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function getTrialClaimById(claimId) {
+    const params = new URLSearchParams({
+        select: 'discord_user_id,status',
+        id: `eq.${claimId}`,
         limit: '1'
     });
     const rows = await supabaseRequest(`/rest/v1/trial_claims?${params}`);
@@ -1032,9 +1044,23 @@ async function ensureGameOnlineForInteraction(interaction, gameKey) {
     return false;
 }
 
+function getFreeTrialAccountAgeError(user, now = Date.now()) {
+    const createdTimestamp = Number(user?.createdTimestamp);
+    if (!Number.isFinite(createdTimestamp) || createdTimestamp <= 0 || createdTimestamp > now) {
+        return '❌ No se pudo verificar la antigüedad de tu cuenta de Discord. Inténtalo de nuevo más tarde.';
+    }
+
+    const eligibleAt = createdTimestamp + FREE_TRIAL_MIN_ACCOUNT_AGE_DAYS * DAY_IN_MS;
+    if (eligibleAt <= now) return null;
+
+    return `❌ Para solicitar la prueba gratis, tu cuenta de Discord debe tener al menos ${FREE_TRIAL_MIN_ACCOUNT_AGE_DAYS} días. Podrás solicitarla <t:${Math.floor(eligibleAt / 1000)}:R>.`;
+}
+
 async function createTrialTicket(interaction, gameKey) {
     const game = GAMES[gameKey];
     const guild = interaction.guild;
+    const accountAgeError = getFreeTrialAccountAgeError(interaction.user);
+    if (accountAgeError) return interaction.editReply(accountAgeError);
     if (!await ensureGameOnlineForInteraction(interaction, gameKey)) return;
     const claim = await createTrialClaim(guild.id, interaction.user.id, gameKey);
 
@@ -1415,11 +1441,20 @@ client.on('interactionCreate', async (interaction) => {
 
             let lic;
             try {
+                const claim = await getTrialClaimById(claimId);
+                if (!claim) throw new Error('No se encontró la solicitud de prueba.');
+                if (claim.status === 'pending') {
+                    const applicant = await client.users.fetch(claim.discord_user_id);
+                    const accountAgeError = getFreeTrialAccountAgeError(applicant);
+                    if (accountAgeError) {
+                        return interaction.reply({ content: accountAgeError, ephemeral: true });
+                    }
+                }
                 lic = await approveTrialClaim(claimId, interaction.user.id);
             } catch (err) {
-                console.error('[APPROVE SUPABASE ERROR]', err);
+                console.error('[APPROVE TRIAL ERROR]', err);
                 return interaction.reply({
-                    content: `❌ No se pudo generar la key en Supabase: \`${err.message}\``,
+                    content: `❌ No se pudo validar o generar la key: \`${err.message}\``,
                     ephemeral: true
                 });
             }
