@@ -284,7 +284,15 @@ async function approveTrialClaim(claimId, moderatorId) {
         method: 'POST',
         body: JSON.stringify({ p_claim_id: claimId, p_moderator_id: moderatorId })
     });
-    return Array.isArray(rows) ? rows[0] : rows;
+    const result = Array.isArray(rows) ? rows[0] : rows;
+    if (!result || typeof result !== 'object') {
+        throw new Error('Supabase no devolvió el resultado de la aprobación.');
+    }
+    const key = result.license_key ?? result.key;
+    if (typeof key !== 'string' || !key.trim()) {
+        throw new Error('Supabase no devolvió la key de la licencia.');
+    }
+    return { ...result, key: key.trim() };
 }
 
 async function revokeLicenseInSupabase(key) {
